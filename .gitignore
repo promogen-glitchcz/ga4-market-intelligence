@@ -1,0 +1,18 @@
+venv/
+__pycache__/
+*.pyc
+*.db-journal
+*.db-shm
+*.db-wal
+.env
+.DS_Store
+*.log
+.vscode/
+.idea/
+.pytest_cache/
+
+# Variant B: DBs are committed so the team can `git pull` and see latest data.
+# Local-only journals/temp files stay ignored. Comment these out if you want
+# DBs out of git (variant A).
+# data/*.db
+# data/*.duckdb

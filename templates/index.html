@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="logo">G4</div>
+            <div>
+                <h1>GA4 Intelligence</h1>
+                <div class="subtitle">Market analytics &amp; predictions</div>
+            </div>
+        </div>
+
+        <nav class="nav">
+            <div class="nav-section-title">Navigácia</div>
+            <button class="nav-item active" data-view="overview">
+                <span class="icon">📊</span><span>Prehľad</span>
+            </button>
+            <button class="nav-item" data-view="dashboard">
+                <span class="icon">📈</span><span>Dashboard</span>
+            </button>
+            <button class="nav-item" data-view="segments">
+                <span class="icon">🎯</span><span>Segmenty</span>
+            </button>
+            <button class="nav-item" data-view="accounts">
+                <span class="icon">🏢</span><span>Účty</span>
+            </button>
+            <button class="nav-item" data-view="insights">
+                <span class="icon">💡</span><span>Insights</span>
+                <span class="badge" id="insights-badge">0</span>
+            </button>
+            <button class="nav-item" data-view="agents">
+                <span class="icon">🤖</span><span>Agenti</span>
+                <span class="live-dot" id="agents-live"></span>
+            </button>
+            <button class="nav-item" data-view="hypotheses">
+                <span class="icon">🔬</span><span>Hypotézy</span>
+            </button>
+            <button class="nav-item" data-view="briefing">
+                <span class="icon">📰</span><span>Daily Briefing</span>
+            </button>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="connection" id="connection-status">
+                <div class="status-dot" id="status-dot"></div>
+                <span id="status-text">Kontroluji...</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+        <!-- Sticky filter bar -->
+        <header class="filter-bar">
+            <div class="filter-group">
+                <label>Segment</label>
+                <select id="filter-segment"><option value="">Všetky segmenty</option></select>
+            </div>
+            <div class="filter-group">
+                <label>Obdobie</label>
+                <select id="filter-period">
+                    <option value="7">Posledných 7 dní</option>
+                    <option value="30" selected>Posledných 30 dní</option>
+                    <option value="90">Posledných 90 dní</option>
+                    <option value="180">Posledných 180 dní</option>
+                    <option value="365">Posledný rok</option>
+                </select>
+            </div>
+            <div class="filter-group filter-accounts">
+                <label>Účty (<span id="accounts-selected-count">0</span> vybraných)</label>
+                <button id="btn-toggle-accounts" class="btn btn-light">Vybrať účty ▾</button>
+                <div class="accounts-dropdown hidden" id="accounts-dropdown">
+                    <input type="text" id="accounts-search" placeholder="Hľadať..." />
+                    <div class="accounts-actions">
+                        <button id="btn-select-all" class="btn-mini">Označiť všetky</button>
+                        <button id="btn-clear-all" class="btn-mini">Zrušiť výber</button>
+                        <button id="btn-select-segment" class="btn-mini">Účty zo segmentu</button>
+                    </div>
+                    <div id="accounts-list" class="accounts-list"></div>
+                </div>
+            </div>
+            <div class="filter-spacer"></div>
+            <button id="btn-refresh" class="btn btn-primary" title="Aktualizuj data">↻ Refresh</button>
+            <button id="btn-run-agents" class="btn btn-accent" title="Spustiť agentov">⚡ Run Agents</button>
+        </header>
+
+        <!-- Views -->
+        <div class="view-container">
+
+            <!-- OVERVIEW -->
+            <section id="view-overview" class="view active">
+                <div class="hero-grid">
+                    <div class="hero-card">
+                        <div class="hero-label">Účty pod monitoringom</div>
+                        <div class="hero-value" id="kpi-accounts">—</div>
+                    </div>
+                    <div class="hero-card">
+                        <div class="hero-label">Segmenty</div>
+                        <div class="hero-value" id="kpi-segments">—</div>
+                    </div>
+                    <div class="hero-card">
+                        <div class="hero-label">Insights za 24h</div>
+                        <div class="hero-value" id="kpi-insights">—</div>
+                    </div>
+                    <div class="hero-card">
+                        <div class="hero-label">Beží agentov</div>
+                        <div class="hero-value" id="kpi-agents">—</div>
+                    </div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header"><h2>Health všetkých segmentov</h2></div>
+                    <div id="segments-grid" class="segments-grid"><div class="loading">Načítavam...</div></div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Account Strip — vybrané účty</h2>
+                        <span class="hint">Vyber účty hore, dáta sa zobrazia tu (1 riadok = 1 účet)</span>
+                    </div>
+                    <div id="account-strip" class="account-strip">
+                        <div class="empty-state">Vyber účty filtroch hore.</div>
+                    </div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header"><h2>Najnovšie insights</h2></div>
+                    <div id="overview-insights" class="insights-list"><div class="loading">Načítavam...</div></div>
+                </div>
+            </section>
+
+            <!-- DASHBOARD -->
+            <section id="view-dashboard" class="view">
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Multi-account chart</h2>
+                        <div class="metric-tabs">
+                            <button class="metric-tab active" data-metric="sessions">Sessions</button>
+                            <button class="metric-tab" data-metric="users">Users</button>
+                            <button class="metric-tab" data-metric="conversions">Konverzie</button>
+                            <button class="metric-tab" data-metric="purchase_revenue">Revenue</button>
+                            <button class="metric-tab" data-metric="bounce_rate">Bounce rate</button>
+                        </div>
+                    </div>
+                    <div class="chart-wrap">
+                        <canvas id="multi-chart"></canvas>
+                    </div>
+                </div>
+                <div class="section-block">
+                    <div class="section-header"><h2>Channel breakdown (vybrané účty)</h2></div>
+                    <div id="channel-breakdown" class="channel-breakdown"><div class="loading">…</div></div>
+                </div>
+                <div class="section-block">
+                    <div class="section-header"><h2>Day-of-Week pattern</h2></div>
+                    <div class="chart-wrap chart-small"><canvas id="dow-chart"></canvas></div>
+                </div>
+            </section>
+
+            <!-- SEGMENTS -->
+            <section id="view-segments" class="view">
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Market Health Score per segment</h2>
+                        <span class="hint">Composite skóre 0-100 zložené z YoY/MoM, conv rate, revenue, engagement, trendu</span>
+                    </div>
+                    <div id="segments-detail" class="segments-detail"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+            <!-- ACCOUNTS -->
+            <section id="view-accounts" class="view">
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Účty &amp; segmenty</h2>
+                        <button id="btn-discover" class="btn btn-primary">Discover GA4 účty</button>
+                    </div>
+                    <div id="accounts-table-wrap"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+            <!-- INSIGHTS -->
+            <section id="view-insights" class="view">
+                <div class="section-block">
+                    <div class="section-header"><h2>Všetky insights</h2></div>
+                    <div class="filter-tabs" id="insights-filters">
+                        <button class="ft active" data-type="">Všetky</button>
+                        <button class="ft" data-type="anomaly">Anomálie</button>
+                        <button class="ft" data-type="trend">Trendy</button>
+                        <button class="ft" data-type="forecast">Forecast</button>
+                        <button class="ft" data-type="health_score">Health</button>
+                        <button class="ft" data-type="correlation">Korelácie</button>
+                    </div>
+                    <div id="insights-full-list" class="insights-list"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+            <!-- AGENTS -->
+            <section id="view-agents" class="view">
+                <div class="section-block">
+                    <div class="section-header"><h2>Agent activity</h2></div>
+                    <div class="agent-controls">
+                        <button class="btn btn-accent" data-agent="anomaly">▶ Anomaly hunter</button>
+                        <button class="btn btn-accent" data-agent="health">▶ Health scorer</button>
+                        <button class="btn btn-accent" data-agent="trend">▶ Trend tracker</button>
+                        <button class="btn btn-accent" data-agent="forecast">▶ Forecaster</button>
+                        <button class="btn btn-accent" data-agent="briefing">▶ Daily briefing</button>
+                        <button class="btn btn-primary" data-agent="all">⚡ Spustiť všetkých</button>
+                    </div>
+                    <div id="agent-activity-list" class="activity-list"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+            <!-- HYPOTHESES -->
+            <section id="view-hypotheses" class="view">
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Položiť otázku</h2>
+                        <span class="hint">Príklad: „Padá segment kola viac ako ostatné?"</span>
+                    </div>
+                    <div class="hypothesis-form">
+                        <textarea id="hypothesis-question" placeholder="Napíš svoju hypotézu / otázku..."></textarea>
+                        <div class="hypothesis-controls">
+                            <select id="hypothesis-scope">
+                                <option value="global">Celý trh</option>
+                                <option value="segment">Konkrétny segment</option>
+                                <option value="account">Konkrétny účet</option>
+                            </select>
+                            <select id="hypothesis-scope-id" class="hidden"></select>
+                            <button id="btn-test-hypothesis" class="btn btn-primary">Otestovať</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="section-block">
+                    <div class="section-header"><h2>Predošlé hypotézy</h2></div>
+                    <div id="hypotheses-list" class="hypotheses-list"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+            <!-- BRIEFING -->
+            <section id="view-briefing" class="view">
+                <div class="section-block">
+                    <div class="section-header"><h2>Daily Briefing</h2></div>
+                    <div id="briefing-content"><div class="loading">…</div></div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+</div>
+
+<script src="/static/js/app.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ga4-app",
+      "runtimeExecutable": "/Users/matusondrussek/Downloads/claude/ga4-market-intelligence/venv/bin/python3",
+      "runtimeArgs": ["-u", "/Users/matusondrussek/Downloads/claude/ga4-market-intelligence/app.py"],
+      "port": 8060
+    }
+  ]
+}
