@@ -11,47 +11,21 @@ logger = logging.getLogger("ga4.auto_segment")
 
 # Keyword → segment slug rules (Czech/Slovak/English combined)
 RULES: list[tuple[str, str]] = [
-    # Hry / gaming
-    (r"\b(hern[ií]|hry|gaming|game|hraj)\b", "hry"),
-    # papierníctvo / kanc. potreby
-    (r"\b(papír|papir|sevt|pavlik|originalniknihy|tisk|print|stickies)\b", "papierenstvo"),
-    # knihy
-    (r"\b(kniha|knih|book|donativo|dobre[-_]?knih)\b", "knihy"),
-    # auto / mobilita
-    (r"\b(auto|esa|car|caravan|mobil[\W_]?aplikac|kola[-_]?radotin)\b", "auto"),
-    # kola / cycling / ski
-    (r"\b(cycle|cycl|bike|ski[\W_]|lyz|lyž|spot[-_]shop|cross[-_]?domain|skicen|skibi)\b", "kola"),
-    # sport
-    (r"\b(sport|fitness|trenirk|trening|trenink|running|fitn|gym|underarmour)\b", "sport"),
-    # zahrada / drevo
-    (r"\b(zahra|garden|drev|wood|palivov|nvdrev|nvpalivov)\b", "zahrada"),
-    # uklid
-    (r"\b(uklid|clean|čisti|cisti)\b", "uklid"),
-    # tisk / print
-    (r"\b(tisk|print|admasys|tisk[a-z]*)\b", "tisk"),
-    # moda
-    (r"\b(moda|fashion|jeans|underwear|stylestyle|kenvelo|baagl|bonek|byvm|enjoy[-_]?style|trenyrk|nedeto|exe[-_]?jeans|timeoutjeans)\b", "moda"),
-    # potraviny / drink
-    (r"\b(food|drink|rum|čokolád|cokolad|kafe|kafest|jansk[ýy]|24daysofrum|united[-_]?drinks|eateebowl|varime|dobroty)\b", "potraviny"),
-    # elektro
-    (r"\b(mobil|elektro|tech|digital[-_]?boss|pcmobil|profi[-_]?webyo|fotov|fotospin|fizual|premium[-_]?candles)\b", "elektro"),
-    # detské
-    (r"\b(děts|detsk|deti|dětsk|baagl|baby|minilove|chcipiska|ella[-_]?a[-_]?max|warehouse1|miláčk|milack)\b", "deti"),
-    # kosmetika / zdraví
-    (r"\b(kosmet|cosmet|nailzz|olivie|nafigate|bellocosm|bellagreen|nejenleky|aquapeeling|liftera|kanyl|destov|aquanix|ocni|kamyk|pragomed|profichondro|profifyto|prouro|probioform|galmed|warehouse[\W_]?1|menstr|modibodi)\b", "kosmetika"),
-    # domacnost / nábytok
-    (r"\b(home|nábyt|nabyt|domác|domalenka|svit|kanc|veneckyjanecek|cendulka|nefertitis|maluna|kalisek)\b", "domacnost"),
+    # Disabled — moje generic keyword rules robia príliš veľa falošných pozitív.
+    # Lepšie je nechať agent_segment_discovery (cez GA4 Admin API industryCategory)
+    # tagnúť čo vie, a zvyšok nechať v "nezarazeno" — užívateľ to bulk-presunie.
 ]
 
 
 def classify_account(name: str, parent_name: str = "") -> list[str]:
-    """Return list of segment slugs (lowercase) that match this account."""
+    """Return list of segment slugs (lowercase) that match this account.
+    With RULES empty, returns ["nezarazeno"] for everything — manual review needed."""
     text = (name + " " + parent_name).lower()
     matches = set()
     for pattern, slug in RULES:
         if re.search(pattern, text, re.IGNORECASE):
             matches.add(slug)
-    return list(matches) or ["ostatni"]
+    return list(matches) or ["nezarazeno"]
 
 
 def auto_segment_all(reclassify: bool = False) -> dict:

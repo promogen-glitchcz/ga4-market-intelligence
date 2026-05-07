@@ -60,6 +60,7 @@ DEFAULT_SEGMENTS = [
     {"slug": "auto", "name": "Auto / mobilita", "color": "#0ea5e9", "icon": "🚗"},
     {"slug": "knihy", "name": "Knihy / médiá", "color": "#8b5cf6", "icon": "📖"},
     {"slug": "ostatni", "name": "Ostatní", "color": "#64748b", "icon": "📦"},
+    {"slug": "nezarazeno", "name": "🔘 Nezařazeno (vyžaduje manuální zařazení)", "color": "#475569", "icon": "❓"},
 ]
 
 # Health score weights (must sum to 1.0)
