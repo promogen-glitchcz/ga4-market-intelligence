@@ -808,42 +808,119 @@ async function renderDOWChart() {
 async function loadSegmentsView() {
   const wrap = $('segments-detail');
   wrap.innerHTML = '<div class="loading">…</div>';
+  const colors = { excellent: '#22c55e', good: '#16a34a', fair: '#f59e0b', poor: '#ea580c', critical: '#ef4444', unknown: '#64748b' };
+  const populated = App.state.segments.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
+  if (!populated.length) { wrap.innerHTML = '<div class="empty-state">Žádné segmenty s účty</div>'; return; }
+
   let html = '';
-  for (const s of App.state.segments) {
+  for (const s of populated) {
     let h;
-    try { h = await api(`/api/health/${s.slug}`); } catch(e) { continue; }
+    try { h = await api(`/api/health/${s.slug}`); } catch(e) { h = {latest: null}; }
     const latest = h.latest;
-    if (!latest) {
-      html += `<div class="segment-detail-card">
-        <div class="sd-left">
-          <span class="sd-icon">${s.icon}</span>
-          <span class="sd-name">${s.name}</span>
-          <span class="sd-score-big" style="color:var(--text-faint)">—</span>
-          <span class="sd-verdict">Žádná data</span>
+    const score = latest ? latest.score : '—';
+    const verdict = latest ? latest.verdict : 'unknown';
+    const summary = latest ? latest.summary : `${s.account_count} účtů — agenti zatím nespočítali zdraví`;
+    html += `<div class="segment-row" data-segment="${s.slug}">
+      <div class="seg-row-header">
+        <span class="sb-icon">${s.icon}</span>
+        <div class="seg-row-title">
+          <div class="sd-name">${s.name}</div>
+          <div style="font-size:11px; color:var(--text-faint)">${s.account_count} účtů · klikni pro detail</div>
         </div>
-        <div class="sd-mid">${s.account_count} účtů v segmentu</div>
-        <div class="sd-right">Spusť agenty pro výpočet</div>
-      </div>`;
-      continue;
-    }
-    const verdict = latest.verdict;
-    const colors = { excellent: '#22c55e', good: '#16a34a', fair: '#f59e0b', poor: '#ea580c', critical: '#ef4444', unknown: '#64748b' };
-    const components = latest.components || {};
-    const compList = Object.entries(components).map(([k, v]) =>
-      `<div class="sd-component"><span>${k}</span><span>${Math.round(v)}</span></div>`
-    ).join('');
-    html += `<div class="segment-detail-card">
-      <div class="sd-left">
-        <span class="sd-icon">${s.icon}</span>
-        <span class="sd-name">${s.name}</span>
-        <span class="sd-score-big" style="color:${colors[verdict]}">${latest.score}</span>
-        <span class="sd-verdict">${latest.verdict}</span>
+        <div class="sd-score-big" style="color:${colors[verdict]}">${score}</div>
+        <button class="btn btn-light btn-mini seg-toggle">Otevřít detail ▾</button>
       </div>
-      <div class="sd-mid">${latest.summary || ''}</div>
-      <div class="sd-right">${compList}</div>
+      <div class="seg-row-body hidden">
+        <div class="seg-row-summary">${summary}</div>
+        <div class="seg-row-chart-wrap"><canvas class="seg-row-chart" id="seg-chart-${s.slug}"></canvas></div>
+        <div class="seg-row-accounts" id="seg-accs-${s.slug}"><em>Načítám účty…</em></div>
+      </div>
     </div>`;
   }
-  wrap.innerHTML = html || '<div class="empty-state">Žádné segmenty s daty</div>';
+  wrap.innerHTML = html;
+
+  // Bind toggles
+  wrap.querySelectorAll('.segment-row').forEach(row => {
+    const btn = row.querySelector('.seg-toggle');
+    btn.addEventListener('click', async () => {
+      const body = row.querySelector('.seg-row-body');
+      const wasHidden = body.classList.contains('hidden');
+      body.classList.toggle('hidden');
+      btn.textContent = wasHidden ? 'Sbalit ▴' : 'Otevřít detail ▾';
+      if (wasHidden) await renderSegmentDetail(row.dataset.segment);
+    });
+  });
+}
+
+async function renderSegmentDetail(slug) {
+  const accs = App.state.accounts.filter(a => (a.segments || []).includes(slug));
+  const ids = accs.map(a => a.property_id);
+  const { start, end } = periodRange();
+
+  // Account list with quick KPIs
+  const accWrap = document.getElementById(`seg-accs-${slug}`);
+  if (!ids.length) { accWrap.innerHTML = '<em>Žádné účty.</em>'; return; }
+  const stripData = await api(`/api/metrics/account_strip?property_ids=${ids.join(',')}&start=${start}&end=${end}`);
+  accWrap.innerHTML = `
+    <table class="accounts-table" style="margin-top:10px">
+      <thead><tr><th>Účet</th><th style="text-align:right">Sessions</th><th style="text-align:right">Tržby</th><th style="text-align:right">Konv.</th><th style="text-align:right">Conv rate</th><th style="text-align:right">YoY</th><th style="text-align:right">Health</th></tr></thead>
+      <tbody>
+        ${stripData.accounts.map(a => {
+          if (a.no_data) return `<tr><td>${a.display_name}</td><td colspan="6" style="color:var(--text-faint)">žádná data</td></tr>`;
+          const k = a.kpis;
+          const yoy = a.yoy_pct != null ? fmtPct(a.yoy_pct) : '—';
+          const yoyCol = a.yoy_pct == null ? 'var(--text-faint)' : a.yoy_pct >= 0 ? '#22c55e' : '#ef4444';
+          const hs = a.health_score;
+          const hsBg = hs == null ? '#475569' : hs > 65 ? '#16a34a' : hs > 45 ? '#f59e0b' : '#ef4444';
+          return `<tr>
+            <td>${a.display_name}<br><code style="font-size:10px">${a.property_id}</code></td>
+            <td style="text-align:right">${fmt(k.sessions)}</td>
+            <td style="text-align:right">${fmt(k.revenue)}</td>
+            <td style="text-align:right">${fmt(k.conversions)}</td>
+            <td style="text-align:right">${k.conv_rate}%</td>
+            <td style="text-align:right; color:${yoyCol}">${yoy}</td>
+            <td style="text-align:right"><span style="background:${hsBg}; color:white; padding:3px 8px; border-radius:4px; font-weight:700">${hs == null ? '—' : Math.round(hs)}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+
+  // Multi-line chart
+  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=sessions&start=${start}&end=${end}`);
+  const dateMap = {};
+  data.series.forEach(s => s.data.forEach(d => { dateMap[d.date] = (dateMap[d.date] || 0) + d.value; }));
+  const sumPoints = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+  const chartColors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
+  const datasets = [
+    { label: 'Součet segmentu', data: sumPoints, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.12)', fill: true, borderWidth: 3, pointRadius: 0, tension: 0.3, order: 0 },
+    ...data.series.filter(s => s.data.length).map((s, i) => ({
+      label: s.display_name,
+      data: s.data.map(d => ({ x: d.date, y: d.value })),
+      borderColor: chartColors[i % chartColors.length] + 'aa',
+      borderWidth: 1,
+      fill: false,
+      pointRadius: 0,
+      tension: 0.2,
+      order: 2,
+    })),
+  ];
+  const canvas = document.getElementById(`seg-chart-${slug}`);
+  if (App.charts['seg-' + slug]) App.charts['seg-' + slug].destroy();
+  App.charts['seg-' + slug] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 10, font: { size: 10 } } },
+      },
+      scales: {
+        x: { type: 'time', time: { unit: 'day' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+      },
+    },
+  });
 }
 
 // ── Accounts table ──
@@ -895,15 +972,62 @@ async function renderAccountsTable() {
       renderAccountsTable();
     });
   });
-  // Bind segment adders
+  // Bind segment adders — popover with checkboxes
   wrap.querySelectorAll('[data-add-pid]').forEach(b => {
-    b.addEventListener('click', () => {
-      const slug = prompt(`Segment slug pro přidání:\n${App.state.segments.map(s => `${s.slug} (${s.name})`).join('\n')}`);
-      if (!slug) return;
-      api(`/api/accounts/${b.dataset.addPid}/segments`, {
-        method: 'POST',
-        body: JSON.stringify({ segment_slug: slug }),
-      }).then(() => renderAccountsTable());
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Remove any existing popovers
+      document.querySelectorAll('.seg-add-popover').forEach(p => p.remove());
+      const pid = b.dataset.addPid;
+      const account = App.state.accounts.find(a => a.property_id === pid);
+      const currentSegs = new Set(account?.segments || []);
+
+      const pop = document.createElement('div');
+      pop.className = 'seg-add-popover';
+      pop.innerHTML = `
+        <div style="font-weight:600; font-size:12px; margin-bottom:8px">Přiřaď segment(y) — ${account?.display_name || pid}</div>
+        <div style="max-height:300px; overflow-y:auto">
+          ${App.state.segments.map(s => `
+            <label class="seg-pop-row">
+              <input type="checkbox" data-slug="${s.slug}" ${currentSegs.has(s.slug) ? 'checked' : ''}>
+              <span>${s.icon} ${s.name}</span>
+              <span style="margin-left:auto; font-size:10px; color:var(--text-faint)">${s.account_count}</span>
+            </label>
+          `).join('')}
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px">
+          <button class="btn-mini seg-pop-save">Uložit</button>
+          <button class="btn-mini seg-pop-close">Zrušit</button>
+        </div>
+      `;
+      const rect = b.getBoundingClientRect();
+      pop.style.position = 'fixed';
+      pop.style.top = (rect.bottom + 6) + 'px';
+      pop.style.left = Math.min(rect.left, window.innerWidth - 320) + 'px';
+      pop.style.zIndex = 1000;
+      document.body.appendChild(pop);
+
+      pop.querySelector('.seg-pop-close').addEventListener('click', () => pop.remove());
+      pop.querySelector('.seg-pop-save').addEventListener('click', async () => {
+        const checked = new Set([...pop.querySelectorAll('input:checked')].map(i => i.dataset.slug));
+        // Add new
+        for (const slug of checked) if (!currentSegs.has(slug)) {
+          await api(`/api/accounts/${pid}/segments`, { method: 'POST', body: JSON.stringify({ segment_slug: slug }) });
+        }
+        // Remove unchecked
+        for (const slug of currentSegs) if (!checked.has(slug)) {
+          await api(`/api/accounts/${pid}/segments/${slug}`, { method: 'DELETE' });
+        }
+        pop.remove();
+        await loadSegments();
+        renderAccountsTable();
+      });
+      // Click outside to close
+      setTimeout(() => {
+        document.addEventListener('click', function close(e) {
+          if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', close); }
+        });
+      }, 0);
     });
   });
 }

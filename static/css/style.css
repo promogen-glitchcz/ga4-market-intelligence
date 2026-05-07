@@ -424,7 +424,25 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .acc-seg-pill.adder:hover { opacity: 1; background: var(--bg-elevated); }
 
 /* Segments detail */
-.segments-detail { display: flex; flex-direction: column; gap: 14px; }
+.segments-detail { display: flex; flex-direction: column; gap: 12px; }
+.segment-row {
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.seg-row-header {
+  padding: 14px 18px;
+  display: flex; align-items: center; gap: 16px;
+  cursor: pointer;
+}
+.seg-row-title { flex: 1; }
+.seg-row-body {
+  padding: 0 18px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.seg-row-summary { font-size: 13px; color: var(--text-dim); padding-top: 6px; border-top: 1px solid var(--border); }
+.seg-row-chart-wrap { height: 280px; position: relative; }
+.seg-row-accounts { font-size: 12px; }
 .segment-detail-card {
   background: var(--bg-elevated); border-radius: 10px; padding: 16px;
   display: grid; grid-template-columns: 220px 1fr 200px; gap: 16px;
@@ -441,6 +459,23 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   display: flex; justify-content: space-between; padding: 3px 0;
   font-size: 11px;
 }
+
+/* Segment add popover */
+.seg-add-popover {
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 12px;
+  width: 320px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+.seg-pop-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 4px;
+  cursor: pointer; font-size: 12px;
+}
+.seg-pop-row:hover { background: var(--bg-elevated); }
+.seg-pop-row input[type="checkbox"] { margin: 0; }
 
 /* Loops grid */
 .loops-grid {
