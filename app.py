@@ -134,12 +134,14 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Account discovery failed (will retry): {e}")
         asyncio.create_task(discover_init())
 
-        _bg_tasks["sync"] = asyncio.create_task(background_sync_loop())
-        _bg_tasks["shallow"] = asyncio.create_task(background_shallow_loop())
-        _bg_tasks["deep"] = asyncio.create_task(background_deep_loop())
-        _bg_tasks["refine"] = asyncio.create_task(background_refine_loop())
-        _bg_tasks["briefing"] = asyncio.create_task(background_briefing_loop())
-        _bg_tasks["publish"] = asyncio.create_task(background_publish_loop())
+        _loop_factories["sync"]     = background_sync_loop
+        _loop_factories["shallow"]  = background_shallow_loop
+        _loop_factories["deep"]     = background_deep_loop
+        _loop_factories["refine"]   = background_refine_loop
+        _loop_factories["briefing"] = background_briefing_loop
+        _loop_factories["publish"]  = background_publish_loop
+        for name, fn in _loop_factories.items():
+            _bg_tasks[name] = asyncio.create_task(fn())
     else:
         logger.warning("No valid OAuth credentials — run oauth_setup.py first")
 
@@ -166,6 +168,13 @@ async def index(request: Request):
 
 @app.get("/api/status")
 def api_status():
+    loops = []
+    for name, t in _bg_tasks.items():
+        loops.append({
+            "name": name,
+            "running": not t.done(),
+            "cancelled": t.cancelled(),
+        })
     return {
         "app_name": APP_NAME,
         "has_credentials": has_valid_credentials(),
@@ -173,7 +182,81 @@ def api_status():
         "accounts_monitored": len(db.list_accounts(monitored_only=True)),
         "segments": len(db.list_segments()),
         "recent_insights": len(db.list_insights(limit=10)),
+        "background_loops": loops,
+        "active_loops": sum(1 for l in loops if l["running"]),
     }
+
+
+_loop_factories: dict = {}  # name -> async function
+
+
+@app.post("/api/agents/loops/{name}/stop")
+def api_loop_stop(name: str):
+    t = _bg_tasks.get(name)
+    if not t:
+        raise HTTPException(404, f"Loop {name} not found")
+    if t.done():
+        return {"ok": True, "status": "already stopped"}
+    t.cancel()
+    return {"ok": True, "status": "cancelled"}
+
+
+@app.post("/api/agents/loops/{name}/start")
+def api_loop_start(name: str):
+    if name not in _loop_factories:
+        raise HTTPException(404, f"Loop {name} not registered")
+    existing = _bg_tasks.get(name)
+    if existing and not existing.done():
+        return {"ok": True, "status": "already running"}
+    _bg_tasks[name] = asyncio.create_task(_loop_factories[name]())
+    return {"ok": True, "status": "started"}
+
+
+@app.post("/api/agents/loops/stop_all")
+def api_loops_stop_all():
+    stopped = 0
+    for name, t in _bg_tasks.items():
+        if not t.done():
+            t.cancel()
+            stopped += 1
+    return {"ok": True, "stopped": stopped}
+
+
+@app.post("/api/agents/loops/start_all")
+def api_loops_start_all():
+    started = 0
+    for name, factory in _loop_factories.items():
+        t = _bg_tasks.get(name)
+        if t and not t.done():
+            continue
+        _bg_tasks[name] = asyncio.create_task(factory())
+        started += 1
+    return {"ok": True, "started": started}
+
+
+@app.get("/api/agents/loops")
+def api_agent_loops():
+    """Detailed status of background loops + next-run estimates."""
+    from datetime import datetime
+    schedules = {
+        "sync":     {"interval_seconds": DATA_SYNC_INTERVAL,    "label": "Sync GA4 metrik", "human": "každých 30 min"},
+        "shallow":  {"interval_seconds": ANALYSIS_INTERVAL,     "label": "Rychlá analýza (anomálie + zdraví + top hybatelé)", "human": "každých 15 min"},
+        "deep":     {"interval_seconds": DEEP_ANALYSIS_INTERVAL,"label": "Hluboká analýza (korelace + vzorce + predikce)", "human": "každé 2 hodiny"},
+        "refine":   {"interval_seconds": INSIGHT_REFINE_INTERVAL,"label": "Vylepšení insights (deduplikace + dismiss)", "human": "každých 6 hodin"},
+        "briefing": {"interval_seconds": 86400, "label": f"Denní briefing", "human": f"každý den v {DAILY_BRIEFING_HOUR:02d}:00"},
+        "publish":  {"interval_seconds": 3600, "label": "Auto-publish do GitHubu", "human": "každou hodinu"},
+    }
+    out = []
+    for name, t in _bg_tasks.items():
+        meta = schedules.get(name, {"label": name, "human": "?"})
+        out.append({
+            "name": name,
+            "label": meta["label"],
+            "frequency": meta["human"],
+            "running": not t.done(),
+            "cancelled": t.cancelled(),
+        })
+    return {"loops": out}
 
 
 # ─────────────── API: accounts & segments ───────────────
@@ -469,6 +552,52 @@ def api_holidays(property_ids: str, start: str, end: str, metric: str = "session
     pids = [p.strip() for p in property_ids.split(",") if p.strip()]
     rows = db.query_daily_metrics(pids, start, end)
     return cor.analyze_holidays(rows, metric)
+
+
+# ─────────────── DB info (where data is, what's in it) ───────────────
+
+@app.get("/api/db/info")
+def api_db_info():
+    from config import SQLITE_DB_PATH, DUCKDB_PATH
+    sqlite_size = SQLITE_DB_PATH.stat().st_size if SQLITE_DB_PATH.exists() else 0
+    duckdb_size = DUCKDB_PATH.stat().st_size if DUCKDB_PATH.exists() else 0
+
+    sqlite_tables = []
+    with db.sqlite_conn() as c:
+        for t in ["segments", "accounts", "account_segments", "insights", "market_health",
+                  "alerts", "agent_activity", "hypotheses", "daily_briefings", "sync_log"]:
+            try:
+                n = c.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+                sqlite_tables.append({"table": t, "rows": n})
+            except: pass
+
+    duckdb_tables = []
+    try:
+        with db.get_duckdb() as conn:
+            for t in ["daily_metrics", "channel_daily", "source_medium_daily",
+                      "device_daily", "country_daily", "hourly_metrics"]:
+                try:
+                    n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                    duckdb_tables.append({"table": t, "rows": n})
+                except: pass
+    except: pass  # may be locked by sync
+
+    return {
+        "sqlite": {
+            "path": str(SQLITE_DB_PATH),
+            "size_bytes": sqlite_size,
+            "size_mb": round(sqlite_size / 1024 / 1024, 2),
+            "tables": sqlite_tables,
+            "purpose": "Konfigurace + výstupy agentů (insights, health, briefings). Commitujeme do GitHubu.",
+        },
+        "duckdb": {
+            "path": str(DUCKDB_PATH),
+            "size_bytes": duckdb_size,
+            "size_mb": round(duckdb_size / 1024 / 1024, 2),
+            "tables": duckdb_tables,
+            "purpose": "Surová GA4 data (sessions, kanály, zařízení, geo, hodinová). NEcommitujeme - lze regenerovat.",
+        },
+    }
 
 
 # ─────────────── Run ───────────────

@@ -123,7 +123,7 @@ function bindFilters() {
     renderAccountsDropdown(); updateSelectedCount(); loadView(App.state.activeView);
   });
   $('btn-select-segment').addEventListener('click', () => {
-    if (!App.state.activeSegment) { alert('Vyber segment vo filtri vľavo'); return; }
+    if (!App.state.activeSegment) { alert('Vyber segment ve filtru vlevo'); return; }
     App.state.accounts.forEach(a => {
       if (a.segments.includes(App.state.activeSegment)) {
         App.state.selectedAccountIds.add(a.property_id);
@@ -149,11 +149,11 @@ function bindControls() {
     $('btn-run-agents').textContent = '⚡ Run Agents';
   });
   $('btn-discover')?.addEventListener('click', async () => {
-    $('btn-discover').textContent = '⏳ Hľadám...';
+    $('btn-discover').textContent = '⏳ Hledám…';
     try { await api('/api/accounts/discover', { method: 'POST' }); } catch(e) { alert('Discover zlyhal: ' + e.message); }
     await loadAccounts();
     await renderAccountsTable();
-    $('btn-discover').textContent = 'Discover GA4 účty';
+    $('btn-discover').textContent = 'Načíst GA4 účty';
   });
 
   // Metric tabs (dashboard)
@@ -197,6 +197,17 @@ function bindControls() {
     });
   });
 
+  // Master loop controls
+  $('btn-stop-all-loops')?.addEventListener('click', async () => {
+    if (!confirm('Zastavit všechny smyčky? Agenti přestanou pracovat dokud je znovu nezapneš.')) return;
+    await api('/api/agents/loops/stop_all', { method: 'POST' });
+    loadAgentActivity(); loadStatus();
+  });
+  $('btn-start-all-loops')?.addEventListener('click', async () => {
+    await api('/api/agents/loops/start_all', { method: 'POST' });
+    loadAgentActivity(); loadStatus();
+  });
+
   // Hypothesis
   $('hypothesis-scope')?.addEventListener('change', e => {
     const v = e.target.value;
@@ -214,7 +225,7 @@ function bindControls() {
   });
   $('btn-test-hypothesis')?.addEventListener('click', async () => {
     const q = $('hypothesis-question').value.trim();
-    if (!q) { alert('Napíš otázku'); return; }
+    if (!q) { alert('Napiš otázku'); return; }
     const scope = $('hypothesis-scope').value;
     const scope_id = $('hypothesis-scope-id').value || '';
     const period_start = daysAgoISO(App.state.period);
@@ -228,7 +239,7 @@ function bindControls() {
       $('hypothesis-question').value = '';
       loadHypotheses();
     } catch(e) { alert('Hypothesis failed: ' + e.message); }
-    $('btn-test-hypothesis').textContent = 'Otestovať';
+    $('btn-test-hypothesis').textContent = 'Otestovat';
   });
 }
 
@@ -237,12 +248,14 @@ function bindControls() {
 async function loadStatus() {
   try {
     const s = await api('/api/status');
-    $('status-text').textContent = s.has_credentials ? 'OAuth pripojený' : 'OAuth chýba';
+    $('status-text').textContent = s.has_credentials ? 'OAuth připojen' : 'OAuth chybí';
     $('status-dot').className = 'status-dot ' + (s.has_credentials ? 'ok' : 'error');
     $('kpi-accounts').textContent = s.accounts_monitored;
     $('kpi-segments').textContent = s.segments;
     $('kpi-insights').textContent = s.recent_insights;
     $('insights-badge').textContent = s.recent_insights;
+    // Show ALWAYS-ON loops, not just currently-running agent invocations
+    $('kpi-agents').textContent = s.active_loops + ' / ' + (s.background_loops || []).length;
   } catch(e) {
     $('status-text').textContent = 'Chyba: ' + e.message;
     $('status-dot').className = 'status-dot error';
@@ -261,9 +274,11 @@ async function loadAccounts() {
 async function loadSegments() {
   const list = await api('/api/segments');
   App.state.segments = list;
+  // Show only segments with accounts, sort by count desc
+  const populated = list.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
   const sel = $('filter-segment');
-  sel.innerHTML = '<option value="">Všetky segmenty</option>' +
-    list.map(s => `<option value="${s.slug}">${s.icon} ${s.name} (${s.account_count})</option>`).join('');
+  sel.innerHTML = '<option value="">Všechny segmenty</option>' +
+    populated.map(s => `<option value="${s.slug}">${s.icon} ${s.name} (${s.account_count})</option>`).join('');
 }
 
 function renderAccountsDropdown() {
@@ -281,7 +296,7 @@ function renderAccountsDropdown() {
       <span class="acc-name">${a.display_name}</span>
       <span class="acc-segments">${segs}</span>
     </label>`;
-  }).join('') : '<div class="empty-state">Žiadne účty. Klikni Discover na karte „Účty".</div>';
+  }).join('') : '<div class="empty-state">Žádné účty. Klikni „Načíst GA4 účty" na kartě „Účty".</div>';
   wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
     cb.addEventListener('change', e => {
       const pid = e.target.dataset.pid;
@@ -313,11 +328,95 @@ async function loadView(view) {
 // ── Overview ──
 
 async function loadOverview() {
+  await renderSegmentBanner();
   await renderSegmentsGrid();
   await renderAccountStrip();
   await renderOverviewChart();
   await renderOverviewSegmentChart();
   await loadOverviewInsights();
+}
+
+async function renderSegmentBanner() {
+  const wrap = $('segment-banner');
+  if (!App.state.activeSegment) { wrap.classList.add('hidden'); return; }
+  const seg = App.state.segments.find(s => s.slug === App.state.activeSegment);
+  if (!seg) { wrap.classList.add('hidden'); return; }
+  const { start, end } = periodRange();
+  let overview;
+  try {
+    overview = await api(`/api/metrics/segment_overview?segment=${seg.slug}&start=${start}&end=${end}`);
+  } catch(e) { wrap.classList.add('hidden'); return; }
+
+  const colors = { excellent: '#22c55e', good: '#16a34a', fair: '#f59e0b', poor: '#ea580c', critical: '#ef4444', unknown: '#64748b' };
+  const verdictText = {
+    excellent: 'Trh frčí', good: 'Trh stabilný', fair: 'Zmiešané signály',
+    poor: 'Trh padá', critical: 'Trh je v riti', unknown: 'Nedostatok dát',
+  };
+
+  if (!overview.available) {
+    wrap.innerHTML = `
+      <div class="sb-left">
+        <span class="sb-icon">${seg.icon}</span>
+        <div class="sb-title-block">
+          <div class="sb-name">${seg.name}</div>
+          <div class="sb-tag">${seg.account_count} účtov · zatiaľ bez dát</div>
+        </div>
+      </div>
+      <div></div>
+      <div class="sb-right"><div class="sb-score-big" style="color:#64748b">—</div></div>
+    `;
+    wrap.classList.remove('hidden');
+    return;
+  }
+
+  const h = overview.health;
+  const score = h.score;
+  const verdict = h.verdict;
+  const color = colors[verdict] || '#64748b';
+  const stripIds = [...App.state.selectedAccountIds];
+  const ids = stripIds.length ? stripIds : (await api(`/api/accounts?monitored_only=false`)).filter(a => a.segments.includes(seg.slug)).map(a => a.property_id);
+
+  // Aggregate KPIs from account_strip endpoint
+  let kpiBlock = '';
+  if (ids.length) {
+    const data = await api(`/api/metrics/account_strip?property_ids=${ids.join(',')}&start=${start}&end=${end}`);
+    let totalSessions = 0, totalUsers = 0, totalRev = 0, totalConv = 0;
+    let yoyVals = [], healthVals = [];
+    data.accounts.forEach(a => {
+      if (a.no_data) return;
+      totalSessions += a.kpis.sessions || 0;
+      totalUsers += a.kpis.users || 0;
+      totalRev += a.kpis.revenue || 0;
+      totalConv += a.kpis.conversions || 0;
+      if (a.yoy_pct != null) yoyVals.push(a.yoy_pct);
+      if (a.health_score != null) healthVals.push(a.health_score);
+    });
+    const avgYoy = yoyVals.length ? yoyVals.reduce((a,b) => a+b, 0) / yoyVals.length : null;
+    const yoyColor = avgYoy == null ? 'var(--text-faint)' : avgYoy >= 0 ? '#22c55e' : '#ef4444';
+    kpiBlock = `
+      <div class="sb-stat"><div class="lbl">Sessions (suma)</div><div class="val">${fmt(totalSessions)}</div></div>
+      <div class="sb-stat"><div class="lbl">Users (suma)</div><div class="val">${fmt(totalUsers)}</div></div>
+      <div class="sb-stat"><div class="lbl">Konverzie (suma)</div><div class="val">${fmt(totalConv)}</div></div>
+      <div class="sb-stat"><div class="lbl">Revenue (suma)</div><div class="val">${fmt(totalRev)}</div>${avgYoy != null ? `<div class="delta" style="color:${yoyColor}">YoY ${fmtPct(avgYoy)}</div>` : ''}</div>
+    `;
+  }
+
+  wrap.innerHTML = `
+    <div class="sb-left">
+      <span class="sb-icon">${seg.icon}</span>
+      <div class="sb-title-block">
+        <div class="sb-name">${seg.name}</div>
+        <div class="sb-tag">${overview.n_accounts} účtov v segmente · ${h.accounts_declining || 0} v poklese</div>
+      </div>
+    </div>
+    <div class="sb-mid">${kpiBlock}</div>
+    <div class="sb-right">
+      <div class="sb-score-big" style="color:${color}">${score}</div>
+      <div class="sb-verdict-text" style="color:${color}">${verdictText[verdict]}</div>
+    </div>
+    <div class="sb-summary">${h.summary || ''}</div>
+  `;
+  wrap.classList.remove('hidden');
 }
 
 async function renderOverviewChart() {
@@ -343,6 +442,36 @@ async function renderOverviewChart() {
     pointRadius: 0,
     tension: 0.2,
   }));
+
+  // Compute trendline on the SUM across all selected accounts
+  const dateMap = {};
+  data.series.forEach(s => s.data.forEach(d => { dateMap[d.date] = (dateMap[d.date] || 0) + d.value; }));
+  const sumPoints = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+  if (sumPoints.length >= 2) {
+    const ys = sumPoints.map(p => p.y);
+    const xs = sumPoints.map((_, i) => i);
+    const n = ys.length;
+    const sumX = xs.reduce((a,b) => a+b, 0);
+    const sumY = ys.reduce((a,b) => a+b, 0);
+    const sumXY = xs.reduce((s, x, i) => s + x*ys[i], 0);
+    const sumX2 = xs.reduce((s, x) => s + x*x, 0);
+    const slope = (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX || 1);
+    const intercept = (sumY - slope*sumX) / n;
+    const avg = sumY / n;
+    const totalChange = (avg > 0 ? slope/avg*100 : 0) * n;
+    const tcolor = totalChange > 5 ? '#22c55e' : totalChange < -5 ? '#ef4444' : '#94a3b8';
+    datasets.push({
+      label: `Trendline součtu (${fmtPct(totalChange)} za období)`,
+      data: xs.map(x => ({ x: sumPoints[x].x, y: slope*x + intercept })),
+      borderColor: tcolor,
+      borderDash: [6, 4],
+      borderWidth: 2.5,
+      fill: false,
+      pointRadius: 0,
+      order: -1,
+    });
+  }
+
   if (App.charts.overview) App.charts.overview.destroy();
   App.charts.overview = new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -363,28 +492,45 @@ async function renderOverviewChart() {
 }
 
 async function renderOverviewSegmentChart() {
-  const ids = [...App.state.selectedAccountIds];
   const { start, end } = periodRange();
   const canvas = $('overview-segment-chart');
   if (!canvas) return;
   const summary = $('overview-segment-summary');
+
+  // Decide which accounts: if a segment is filtered, use ALL accounts in that segment.
+  // Otherwise fall back to user-selected accounts.
+  let ids = [];
+  let title = '';
+  if (App.state.activeSegment) {
+    const segAccounts = App.state.accounts.filter(a => (a.segments || []).includes(App.state.activeSegment));
+    ids = segAccounts.map(a => a.property_id);
+    const seg = App.state.segments.find(s => s.slug === App.state.activeSegment);
+    title = `segment „${seg ? seg.name : App.state.activeSegment}" (${ids.length} účtů)`;
+  } else {
+    ids = [...App.state.selectedAccountIds];
+    title = `vybrané účty (${ids.length})`;
+  }
+
   if (!ids.length) {
     if (App.charts.segChart) { App.charts.segChart.destroy(); delete App.charts.segChart; }
-    summary.innerHTML = '<em style="color:var(--text-faint)">Vyber aspoň 1 účet hore aby si videl agregovaný trend.</em>';
+    summary.innerHTML = '<em style="color:var(--text-faint)">Vyber segment ve filtru nahoře, nebo vyber konkrétní účty.</em>';
     return;
   }
-  // Aggregate sessions across selected accounts
+
+  // Pull all account series in one call
   const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=sessions&start=${start}&end=${end}`);
+
+  // Aggregate (segment sum)
   const dateMap = {};
   data.series.forEach(s => s.data.forEach(d => {
     dateMap[d.date] = (dateMap[d.date] || 0) + d.value;
   }));
-  const points = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
-  if (!points.length) { summary.innerHTML = '<em>Žiadne dáta v zvolenom období.</em>'; return; }
+  const sumPoints = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+  if (!sumPoints.length) { summary.innerHTML = '<em>Žádná data ve zvoleném období.</em>'; return; }
 
-  // Compute simple linear trend
-  const ys = points.map(p => p.y);
-  const xs = points.map((_, i) => i);
+  // Linear trend on the sum
+  const ys = sumPoints.map(p => p.y);
+  const xs = sumPoints.map((_, i) => i);
   const n = ys.length;
   const sumX = xs.reduce((a,b) => a+b, 0);
   const sumY = ys.reduce((a,b) => a+b, 0);
@@ -392,26 +538,47 @@ async function renderOverviewSegmentChart() {
   const sumX2 = xs.reduce((s, x) => s + x*x, 0);
   const slope = (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX || 1);
   const intercept = (sumY - slope*sumX) / n;
-  const trendline = xs.map(x => ({ x: points[x].x, y: slope*x + intercept }));
+  const trendline = xs.map(x => ({ x: sumPoints[x].x, y: slope*x + intercept }));
   const avg = sumY / n;
   const pctPerDay = avg > 0 ? slope/avg*100 : 0;
   const totalChange = pctPerDay * n;
-  const direction = totalChange > 5 ? '📈 RASTIE' : totalChange < -5 ? '📉 PADÁ' : '➡️ STAGNUJE';
-  const color = totalChange > 5 ? '#22c55e' : totalChange < -5 ? '#ef4444' : '#94a3b8';
+  const direction = totalChange > 5 ? '📈 ROSTE' : totalChange < -5 ? '📉 PADÁ' : '➡️ STAGNUJE';
+  const trendColor = totalChange > 5 ? '#22c55e' : totalChange < -5 ? '#ef4444' : '#94a3b8';
+
+  // Per-account thin lines
+  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e', '#fbbf24', '#a3e635'];
+  const accountDatasets = data.series
+    .filter(s => s.data.length > 0)
+    .map((s, i) => ({
+      label: s.display_name,
+      data: s.data.map(d => ({ x: d.date, y: d.value })),
+      borderColor: colors[i % colors.length] + 'aa',
+      borderWidth: 1,
+      fill: false,
+      pointRadius: 0,
+      tension: 0.2,
+      hidden: false,
+    }));
 
   if (App.charts.segChart) App.charts.segChart.destroy();
   App.charts.segChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
       datasets: [
-        { label: 'Súčet sessions', data: points, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.15)', fill: true, borderWidth: 2.5, pointRadius: 0, tension: 0.3 },
-        { label: 'Trendline', data: trendline, borderColor: color, borderDash: [6,4], borderWidth: 2, fill: false, pointRadius: 0 },
+        // Segment sum: thick filled line
+        { label: 'Součet segmentu', data: sumPoints, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.12)', fill: true, borderWidth: 3, pointRadius: 0, tension: 0.3, order: 0 },
+        // Trendline
+        { label: 'Trendline', data: trendline, borderColor: trendColor, borderDash: [6,4], borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+        // Per-account thin lines
+        ...accountDatasets.map(d => ({ ...d, order: 2 })),
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 12 } },
+        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 10, font: { size: 11 } } },
+        tooltip: { backgroundColor: '#1a2230', borderColor: '#1f2a3a', borderWidth: 1 },
       },
       scales: {
         x: { type: 'time', time: { unit: 'day' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
@@ -420,15 +587,13 @@ async function renderOverviewSegmentChart() {
     },
   });
 
-  const total = sumY;
-  const days = n;
   summary.innerHTML = `
-    <div style="display:flex; gap:18px; flex-wrap:wrap">
-      <div><strong style="color:${color}">${direction}</strong></div>
-      <div>Celkom za obdobie: <strong>${fmt(total)}</strong> sessions</div>
-      <div>Priemerne / deň: <strong>${fmt(avg)}</strong></div>
-      <div>Trend: <strong style="color:${color}">${fmtPct(pctPerDay)}</strong> / deň (${fmtPct(totalChange)} za ${days} dní)</div>
-      <div>Vybraných účtov: <strong>${ids.length}</strong></div>
+    <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:center">
+      <div><strong style="color:${trendColor}; font-size:14px">${direction}</strong></div>
+      <div>${title}</div>
+      <div>Celkem za období: <strong>${fmt(sumY)}</strong> sessions</div>
+      <div>Průměr / den: <strong>${fmt(avg)}</strong></div>
+      <div>Trend: <strong style="color:${trendColor}">${fmtPct(pctPerDay)}</strong> / den (${fmtPct(totalChange)} za ${n} dní)</div>
     </div>
   `;
 }
@@ -436,7 +601,10 @@ async function renderOverviewSegmentChart() {
 async function renderSegmentsGrid() {
   const wrap = $('segments-grid');
   wrap.innerHTML = '';
-  for (const s of App.state.segments) {
+  // Only show segments with accounts
+  const populated = App.state.segments.filter(s => s.account_count > 0)
+                                       .sort((a,b) => b.account_count - a.account_count);
+  for (const s of populated) {
     if (App.state.activeSegment && s.slug !== App.state.activeSegment) continue;
     let h;
     try { h = await api(`/api/health/${s.slug}`); } catch(e) { continue; }
@@ -458,13 +626,13 @@ async function renderSegmentsGrid() {
       </div>
     `;
   }
-  if (!wrap.innerHTML) wrap.innerHTML = '<div class="empty-state">Žiadne segmenty s dátami. Spusti Run Agents.</div>';
+  if (!wrap.innerHTML) wrap.innerHTML = '<div class="empty-state">Žádné segmenty s daty. Spusť „Spustit agenty".</div>';
 }
 
 async function renderAccountStrip() {
   const ids = [...App.state.selectedAccountIds];
   if (!ids.length) {
-    $('account-strip').innerHTML = '<div class="empty-state">Vyber účty vo filtri hore (▾ Vybrať účty).</div>';
+    $('account-strip').innerHTML = '<div class="empty-state">Vyber účty ve filtru nahoře (▾ Vybrat účty).</div>';
     return;
   }
   const { start, end } = periodRange();
@@ -473,7 +641,7 @@ async function renderAccountStrip() {
   wrap.innerHTML = '';
   data.accounts.forEach((a, i) => {
     if (a.no_data) {
-      wrap.innerHTML += `<div class="account-row-strip"><div class="acc-strip-name">${a.display_name}<span class="pid">${a.property_id}</span></div><div style="grid-column: 2/-1; color:var(--text-faint)">Žiadne dáta — spusti sync</div></div>`;
+      wrap.innerHTML += `<div class="account-row-strip"><div class="acc-strip-name">${a.display_name}<span class="pid">${a.property_id}</span></div><div style="grid-column: 2/-1; color:var(--text-faint)">Žádná data — spusť synchronizaci</div></div>`;
       return;
     }
     const k = a.kpis;
@@ -489,8 +657,8 @@ async function renderAccountStrip() {
         <div class="acc-strip-kpi"><div class="kpi-label">Sessions</div><div class="kpi-val">${fmt(k.sessions)}</div></div>
         <div class="acc-strip-kpi"><div class="kpi-label">Users</div><div class="kpi-val">${fmt(k.users)}</div></div>
         <div class="acc-strip-kpi"><div class="kpi-label">Konv.</div><div class="kpi-val">${fmt(k.conversions)}</div></div>
-        <div class="acc-strip-kpi"><div class="kpi-label">Revenue</div><div class="kpi-val">${fmt(k.revenue)}</div></div>
-        <div class="acc-strip-kpi"><div class="kpi-label">Conv rate</div><div class="kpi-val">${k.conv_rate}%</div></div>
+        <div class="acc-strip-kpi"><div class="kpi-label">Tržby</div><div class="kpi-val">${fmt(k.revenue)}</div></div>
+        <div class="acc-strip-kpi"><div class="kpi-label">Konv. míra</div><div class="kpi-val">${k.conv_rate}%</div></div>
         <div class="acc-strip-spark"><canvas id="spark-${i}" height="36"></canvas></div>
         <div class="acc-strip-trend ${yoyCls}">YoY ${yoy}</div>
         <div class="acc-strip-health" style="background:${hsBg}; color:white">${hs == null ? '—' : Math.round(hs)}</div>
@@ -598,7 +766,7 @@ async function renderChannelBreakdown() {
           <div class="channel-share">${pct}% sessions</div>
         </div>`;
       }).join('')
-    : '<div class="empty-state">Žiadne dáta. Spusti Refresh.</div>';
+    : '<div class="empty-state">Žádná data. Spusť „Aktualizovat".</div>';
 }
 
 async function renderDOWChart() {
@@ -651,10 +819,10 @@ async function loadSegmentsView() {
           <span class="sd-icon">${s.icon}</span>
           <span class="sd-name">${s.name}</span>
           <span class="sd-score-big" style="color:var(--text-faint)">—</span>
-          <span class="sd-verdict">Žiadne dáta</span>
+          <span class="sd-verdict">Žádná data</span>
         </div>
-        <div class="sd-mid">${s.account_count} účtov v segmente</div>
-        <div class="sd-right">Spusti agentov pre výpočet</div>
+        <div class="sd-mid">${s.account_count} účtů v segmentu</div>
+        <div class="sd-right">Spusť agenty pro výpočet</div>
       </div>`;
       continue;
     }
@@ -675,7 +843,7 @@ async function loadSegmentsView() {
       <div class="sd-right">${compList}</div>
     </div>`;
   }
-  wrap.innerHTML = html || '<div class="empty-state">Žiadne segmenty s dátami</div>';
+  wrap.innerHTML = html || '<div class="empty-state">Žádné segmenty s daty</div>';
 }
 
 // ── Accounts table ──
@@ -684,20 +852,20 @@ async function renderAccountsTable() {
   await loadAccounts();  // refresh
   const wrap = $('accounts-table-wrap');
   if (!App.state.accounts.length) {
-    wrap.innerHTML = '<div class="empty-state">Žiadne účty. Klikni „Discover GA4 účty".</div>';
+    wrap.innerHTML = '<div class="empty-state">Žádné účty. Klikni „Načíst GA4 účty".</div>';
     return;
   }
   const segMap = Object.fromEntries(App.state.segments.map(s => [s.slug, s]));
   let html = `<table class="accounts-table">
     <thead><tr>
-      <th>Property ID</th><th>Názov</th><th>Účet</th><th>Mena</th><th>Segmenty</th><th>Monitor</th>
+      <th>Property ID</th><th>Název</th><th>Účet</th><th>Měna</th><th>Segmenty</th><th>Monitor</th>
     </tr></thead><tbody>`;
   App.state.accounts.forEach(a => {
     const segs = (a.segments || []).map(slug => {
       const s = segMap[slug];
       return s ? `<span class="acc-seg-pill">${s.icon} ${s.name}<span class="x" data-rm-pid="${a.property_id}" data-rm-slug="${slug}">×</span></span>` : '';
     }).join('');
-    const adder = `<span class="acc-seg-pill adder" data-add-pid="${a.property_id}">+ pridať</span>`;
+    const adder = `<span class="acc-seg-pill adder" data-add-pid="${a.property_id}">+ přidat</span>`;
     html += `<tr>
       <td><code>${a.property_id}</code></td>
       <td>${a.display_name}</td>
@@ -730,7 +898,7 @@ async function renderAccountsTable() {
   // Bind segment adders
   wrap.querySelectorAll('[data-add-pid]').forEach(b => {
     b.addEventListener('click', () => {
-      const slug = prompt(`Segment slug pre pridanie:\n${App.state.segments.map(s => `${s.slug} (${s.name})`).join('\n')}`);
+      const slug = prompt(`Segment slug pro přidání:\n${App.state.segments.map(s => `${s.slug} (${s.name})`).join('\n')}`);
       if (!slug) return;
       api(`/api/accounts/${b.dataset.addPid}/segments`, {
         method: 'POST',
@@ -751,7 +919,7 @@ async function loadFullInsights() {
 
 function renderInsightList(wrap, insights) {
   if (!insights?.length) {
-    wrap.innerHTML = '<div class="empty-state">Žiadne insights — spusti agentov.</div>';
+    wrap.innerHTML = '<div class="empty-state">Žádné insights — spusť agenty.</div>';
     return;
   }
   const icons = { anomaly: '⚠️', trend: '📈', forecast: '🔮', health_score: '❤️', correlation: '🔗', briefing: '📰', hypothesis: '🔬' };
@@ -782,10 +950,77 @@ function renderInsightList(wrap, insights) {
 // ── Agents ──
 
 async function loadAgentActivity() {
+  // Loops grid with stop/start controls
+  try {
+    const ld = await api('/api/agents/loops');
+    const lwrap = $('loops-grid');
+    if (lwrap) {
+      lwrap.innerHTML = ld.loops.map(l => `
+        <div class="loop-card ${l.running ? '' : 'stopped'}">
+          <div class="loop-name">
+            ${l.label}
+            <span class="loop-state">${l.running ? '● běží' : 'zastaven'}</span>
+          </div>
+          <div class="loop-freq">⏱ ${l.frequency}</div>
+          <div style="display:flex; gap:6px; margin-top:6px">
+            ${l.running
+              ? `<button class="btn-mini loop-stop" data-loop="${l.name}" style="background:#ef4444;color:white;border-color:#ef4444">⏸ Zastavit</button>`
+              : `<button class="btn-mini loop-start" data-loop="${l.name}" style="background:#22c55e;color:white;border-color:#22c55e">▶ Spustit</button>`}
+          </div>
+        </div>
+      `).join('');
+      lwrap.querySelectorAll('.loop-stop').forEach(b => {
+        b.addEventListener('click', async () => {
+          await api(`/api/agents/loops/${b.dataset.loop}/stop`, { method: 'POST' });
+          loadAgentActivity(); loadStatus();
+        });
+      });
+      lwrap.querySelectorAll('.loop-start').forEach(b => {
+        b.addEventListener('click', async () => {
+          await api(`/api/agents/loops/${b.dataset.loop}/start`, { method: 'POST' });
+          loadAgentActivity(); loadStatus();
+        });
+      });
+    }
+  } catch(e) { console.error('loops failed', e); }
+
+  // DB info
+  try {
+    const info = await api('/api/db/info');
+    const dwrap = $('db-info');
+    if (dwrap) {
+      const renderTbl = (rows) => rows.map(r => `<tr><td><code>${r.table}</code></td><td style="text-align:right">${r.rows.toLocaleString('cs-CZ')}</td></tr>`).join('');
+      dwrap.innerHTML = `
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 14px">
+          <div class="loop-card" style="border-left-color: #6366f1">
+            <div class="loop-name">📊 SQLite (insights + konfigurace)</div>
+            <div style="font-size:11px; color:var(--text-faint); word-break:break-all">${info.sqlite.path}</div>
+            <div style="font-size:11px; color:var(--text-dim)">${info.sqlite.purpose}</div>
+            <div style="font-size:11px; margin-top:6px">Velikost: <strong>${info.sqlite.size_mb} MB</strong></div>
+            <table class="accounts-table" style="margin-top:8px; font-size:11px">
+              <thead><tr><th>Tabulka</th><th style="text-align:right">Záznamů</th></tr></thead>
+              <tbody>${renderTbl(info.sqlite.tables)}</tbody>
+            </table>
+          </div>
+          <div class="loop-card" style="border-left-color: #f59e0b">
+            <div class="loop-name">📦 DuckDB (surová GA4 data)</div>
+            <div style="font-size:11px; color:var(--text-faint); word-break:break-all">${info.duckdb.path}</div>
+            <div style="font-size:11px; color:var(--text-dim)">${info.duckdb.purpose}</div>
+            <div style="font-size:11px; margin-top:6px">Velikost: <strong>${info.duckdb.size_mb} MB</strong></div>
+            <table class="accounts-table" style="margin-top:8px; font-size:11px">
+              <thead><tr><th>Tabulka</th><th style="text-align:right">Záznamů</th></tr></thead>
+              <tbody>${renderTbl(info.duckdb.tables)}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+  } catch(e) { console.error('db info failed', e); }
+
   const data = await api('/api/agents/activity?limit=50');
   const wrap = $('agent-activity-list');
   if (!data.activity?.length) {
-    wrap.innerHTML = '<div class="empty-state">Žiadna aktivita — spusti agenta.</div>';
+    wrap.innerHTML = '<div class="empty-state">Žádná aktivita — spusť agenta.</div>';
     return;
   }
   wrap.innerHTML = data.activity.map(a => {
@@ -808,7 +1043,7 @@ async function loadHypotheses() {
   const data = await api('/api/hypothesis?limit=30');
   const wrap = $('hypotheses-list');
   if (!data.hypotheses?.length) {
-    wrap.innerHTML = '<div class="empty-state">Žiadne hypotézy zatiaľ.</div>';
+    wrap.innerHTML = '<div class="empty-state">Zatím žádné hypotézy.</div>';
     return;
   }
   wrap.innerHTML = data.hypotheses.map(h => `
@@ -825,13 +1060,13 @@ async function loadBriefing() {
   const data = await api('/api/briefing');
   const wrap = $('briefing-content');
   if (!data.briefing) {
-    wrap.innerHTML = '<div class="empty-state">Žiadny briefing — spusti „Daily briefing" v Agents.</div>';
+    wrap.innerHTML = '<div class="empty-state">Žádný briefing — spusť „Denní briefing" v Agentech.</div>';
     return;
   }
   const b = data.briefing;
   wrap.innerHTML = `
     <h2>${b.headline}</h2>
-    <div style="color:var(--text-faint); font-size: 11px; margin-bottom: 12px">${b.briefing_date} · vygenerované ${new Date(b.generated_at).toLocaleString('cs-CZ')}</div>
+    <div style="color:var(--text-faint); font-size: 11px; margin-bottom: 12px">${b.briefing_date} · vygenerováno ${new Date(b.generated_at).toLocaleString('cs-CZ')}</div>
     <div style="white-space: pre-wrap">${b.body}</div>
   `;
 }

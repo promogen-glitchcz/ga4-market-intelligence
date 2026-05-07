@@ -3,6 +3,8 @@ These run continuously alongside the basic agents, accumulating intelligence.
 """
 import json
 import logging
+import re
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
@@ -13,9 +15,98 @@ import database as db
 import analyzer as az
 import correlations as cor
 import intelligence as intel
-from ga4_api import days_ago, today_iso
+from ga4_api import days_ago, today_iso, get_property_details
 
 logger = logging.getLogger("ga4.agents.advanced")
+
+
+# ─────────────── Agent: Segment discovery (auto-tags from GA4 metadata) ───────────────
+
+# Map GA4 industryCategory enum → our segment slug + display name + icon
+GA4_INDUSTRY_MAP = {
+    "AUTOMOTIVE": ("auto", "Auto / mobilita", "🚗"),
+    "BUSINESS_AND_INDUSTRIAL_MARKETS": ("b2b", "B2B / podnikanie", "💼"),
+    "FINANCE": ("finance", "Finance / pojištění", "💰"),
+    "HEALTHCARE": ("zdravie", "Zdravie / medicína", "🏥"),
+    "TECHNOLOGY": ("elektro", "Elektro / technika", "💡"),
+    "TRAVEL": ("cestovanie", "Cestovanie / turizmus", "✈️"),
+    "OTHER": ("ostatni", "Ostatní", "📦"),
+    "ARTS_AND_ENTERTAINMENT": ("zabava", "Zábava / kultúra", "🎭"),
+    "BEAUTY_AND_FITNESS": ("kosmetika", "Kosmetika / zdraví", "💄"),
+    "BOOKS_AND_LITERATURE": ("knihy", "Knihy / médiá", "📖"),
+    "FOOD_AND_DRINK": ("potraviny", "Potraviny / nápoje", "🥗"),
+    "GAMES": ("hry", "Hry / hraní", "🎮"),
+    "HOBBIES_AND_LEISURE": ("hobby", "Hobby / voľný čas", "🎨"),
+    "HOME_AND_GARDEN": ("zahrada", "Zahrada / domácnosť", "🌱"),
+    "INTERNET_AND_TELECOM": ("internet", "Internet / telco", "📡"),
+    "JOBS_AND_EDUCATION": ("vzdelavanie", "Vzdelávanie / kariéra", "🎓"),
+    "LAW_AND_GOVERNMENT": ("pravo", "Právo / štát", "⚖️"),
+    "NEWS": ("media", "Média / správy", "📰"),
+    "ONLINE_COMMUNITIES": ("komunity", "Online komunity", "💬"),
+    "PEOPLE_AND_SOCIETY": ("spolocnost", "Spoločnosť", "👥"),
+    "PETS_AND_ANIMALS": ("zvierata", "Zvieratá / pets", "🐾"),
+    "REAL_ESTATE": ("reality", "Reality / nehnuteľnosti", "🏠"),
+    "REFERENCE": ("referencia", "Referencia / info", "📚"),
+    "SCIENCE": ("veda", "Veda / výskum", "🔬"),
+    "SHOPPING": ("eshop", "E-shop / shopping", "🛒"),
+    "SPORTS": ("sport", "Sport / fitness", "💪"),
+}
+
+
+def agent_segment_discovery(force_refresh: bool = False) -> dict:
+    """Use GA4 Admin API to read industry category for each property,
+    auto-create matching segments and tag accounts. Idempotent."""
+    run_id = db.start_agent_run("segment_discovery")
+    findings = 0
+    new_segments = 0
+    try:
+        accounts = db.list_accounts()
+        category_counts = Counter()
+
+        for a in accounts:
+            # Skip if already tagged with a discovered segment (unless forced)
+            if not force_refresh and a.get("segments"):
+                # Only skip if it has a non-"ostatni" tag
+                if any(s != "ostatni" for s in a["segments"]):
+                    continue
+            try:
+                details = get_property_details(a["property_id"])
+            except Exception as e:
+                logger.warning(f"  could not fetch industry for {a['property_id']}: {e}")
+                continue
+
+            ga4_cat = details.get("industry_category", "")
+            if not ga4_cat:
+                category_counts["UNCATEGORIZED"] += 1
+                continue
+
+            mapping = GA4_INDUSTRY_MAP.get(ga4_cat, (ga4_cat.lower().replace("_", "-"),
+                                                       ga4_cat.replace("_", " ").title(), "📦"))
+            slug, name, icon = mapping
+            category_counts[ga4_cat] += 1
+
+            # Create the segment if missing
+            existing_segs = [s["slug"] for s in db.list_segments()]
+            if slug not in existing_segs:
+                db.add_segment(slug, name, "#64748b", icon)
+                new_segments += 1
+                logger.info(f"  created segment '{slug}' ({name})")
+
+            # Remove "ostatni" if we have a better tag now
+            if "ostatni" in (a.get("segments") or []):
+                db.remove_segment(a["property_id"], "ostatni")
+            db.assign_segment(a["property_id"], slug)
+            findings += 1
+
+        summary = (f"Tagged {findings} accounts from GA4 industry. "
+                   f"New segments: {new_segments}. Distribution: " +
+                   ", ".join(f"{k}={v}" for k, v in category_counts.most_common(8)))
+        db.finish_agent_run(run_id, "success", findings, summary)
+        return {"tagged": findings, "new_segments": new_segments, "distribution": dict(category_counts)}
+    except Exception as e:
+        logger.exception("Segment discovery failed")
+        db.finish_agent_run(run_id, "error", findings, "", str(e))
+        raise
 
 
 # ─────────────── Agent: Cross-account correlation hunter ───────────────
@@ -290,6 +381,7 @@ def agent_top_movers() -> dict:
 # ─────────────── Registry ───────────────
 
 ADVANCED_AGENTS = {
+    "segment_discovery": agent_segment_discovery,
     "correlation": agent_cross_account_correlation,
     "pattern": agent_pattern_hunter,
     "channel_shift": agent_channel_shift_detector,

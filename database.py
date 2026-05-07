@@ -158,14 +158,12 @@ def sqlite_conn():
 def init_sqlite():
     with sqlite_conn() as c:
         c.executescript(SQLITE_SCHEMA)
-        # Seed default segments if empty
-        existing = c.execute("SELECT COUNT(*) AS n FROM segments").fetchone()["n"]
-        if existing == 0:
-            c.executemany(
-                "INSERT INTO segments (slug, name, color, icon) VALUES (?, ?, ?, ?)",
-                [(s["slug"], s["name"], s["color"], s["icon"]) for s in DEFAULT_SEGMENTS],
+        # Idempotent seed: insert any missing default segments
+        for s in DEFAULT_SEGMENTS:
+            c.execute(
+                "INSERT OR IGNORE INTO segments (slug, name, color, icon) VALUES (?, ?, ?, ?)",
+                (s["slug"], s["name"], s["color"], s["icon"]),
             )
-            logger.info(f"Seeded {len(DEFAULT_SEGMENTS)} default segments")
 
 
 # ── Account/segment management ──

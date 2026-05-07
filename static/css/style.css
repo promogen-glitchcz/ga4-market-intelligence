@@ -442,6 +442,61 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   font-size: 11px;
 }
 
+/* Loops grid */
+.loops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.loop-card {
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 14px;
+  border-left: 3px solid var(--success);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.loop-card.stopped { border-left-color: var(--danger); opacity: 0.6; }
+.loop-card .loop-name {
+  font-weight: 600; font-size: 13px;
+  display: flex; align-items: center; gap: 8px;
+}
+.loop-card .loop-state {
+  font-size: 10px; padding: 2px 7px; border-radius: 999px;
+  background: var(--success); color: white; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.loop-card.stopped .loop-state { background: var(--danger); }
+.loop-card .loop-freq { font-size: 11px; color: var(--text-faint); }
+.loop-card .loop-desc { font-size: 11px; color: var(--text-dim); }
+
+/* Segment banner */
+.segment-banner {
+  background: linear-gradient(135deg, #1e293b, #1a2230);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: 280px 1fr 220px;
+  gap: 24px;
+  align-items: center;
+}
+.sb-left { display: flex; align-items: center; gap: 16px; }
+.sb-icon { font-size: 56px; }
+.sb-title-block .sb-name { font-size: 22px; font-weight: 700; }
+.sb-title-block .sb-tag { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+.sb-mid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.sb-stat { display: flex; flex-direction: column; }
+.sb-stat .lbl { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+.sb-stat .val { font-size: 18px; font-weight: 700; margin-top: 2px; }
+.sb-stat .delta { font-size: 11px; margin-top: 2px; }
+.sb-right { text-align: right; }
+.sb-score-big {
+  font-size: 64px; font-weight: 800; line-height: 1;
+}
+.sb-verdict-text { font-size: 14px; font-weight: 600; margin-top: 6px; }
+.sb-summary { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-dim); }
+
 /* Misc */
 .hidden { display: none !important; }
 .empty-state {
