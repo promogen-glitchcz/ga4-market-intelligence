@@ -87,6 +87,22 @@ async def background_refine_loop():
         await asyncio.sleep(INSIGHT_REFINE_INTERVAL)
 
 
+async def background_publish_loop():
+    """Auto-commit + push the insights DB every hour so the team sees latest data."""
+    await asyncio.sleep(60 * 30)  # first run after 30 min
+    while True:
+        try:
+            from auto_publish import publish
+            result = await asyncio.to_thread(publish)
+            if result.get("status") == "ok":
+                logger.info(f"Auto-published insights DB to git: {result.get('ts')}")
+            elif result.get("status") == "error":
+                logger.warning(f"Auto-publish error at {result.get('step')}: {result.get('error')}")
+        except Exception as e:
+            logger.exception(f"Auto-publish failed: {e}")
+        await asyncio.sleep(60 * 60)  # every hour
+
+
 async def background_briefing_loop():
     """Daily briefing at DAILY_BRIEFING_HOUR local time."""
     while True:
@@ -123,6 +139,7 @@ async def lifespan(app: FastAPI):
         _bg_tasks["deep"] = asyncio.create_task(background_deep_loop())
         _bg_tasks["refine"] = asyncio.create_task(background_refine_loop())
         _bg_tasks["briefing"] = asyncio.create_task(background_briefing_loop())
+        _bg_tasks["publish"] = asyncio.create_task(background_publish_loop())
     else:
         logger.warning("No valid OAuth credentials — run oauth_setup.py first")
 

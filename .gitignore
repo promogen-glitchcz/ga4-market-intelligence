@@ -11,8 +11,12 @@ __pycache__/
 .idea/
 .pytest_cache/
 
-# Variant B: DBs are committed so the team can `git pull` and see latest data.
-# Local-only journals/temp files stay ignored. Comment these out if you want
-# DBs out of git (variant A).
-# data/*.db
-# data/*.duckdb
+# DuckDB warehouse is too large for git (50+ MB) - regenerate via `python sync.py`
+data/*.duckdb
+data/*.duckdb.wal
+data/launchagent.log
+data/launchagent.err
+
+# DO commit ga4_intel.db (insights, health scores, briefings, agent activity)
+# - it's <2 MB and represents the team-visible analyzed output. Auto-published
+# every hour by auto_publish.py background loop.

@@ -66,14 +66,22 @@
                 <select id="filter-segment"><option value="">Všetky segmenty</option></select>
             </div>
             <div class="filter-group">
-                <label>Obdobie</label>
+                <label>Obdobie (preset)</label>
                 <select id="filter-period">
                     <option value="7">Posledných 7 dní</option>
                     <option value="30" selected>Posledných 30 dní</option>
                     <option value="90">Posledných 90 dní</option>
                     <option value="180">Posledných 180 dní</option>
                     <option value="365">Posledný rok</option>
+                    <option value="custom">Vlastné…</option>
                 </select>
+            </div>
+            <div class="filter-group" id="filter-custom-dates" style="display:none">
+                <label>Od → Do</label>
+                <div style="display:flex; gap:6px">
+                    <input type="date" id="filter-date-start" />
+                    <input type="date" id="filter-date-end" />
+                </div>
             </div>
             <div class="filter-group filter-accounts">
                 <label>Účty (<span id="accounts-selected-count">0</span> vybraných)</label>
@@ -130,6 +138,32 @@
                     <div id="account-strip" class="account-strip">
                         <div class="empty-state">Vyber účty filtroch hore.</div>
                     </div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Trend vybraných účtov</h2>
+                        <div class="metric-tabs" id="overview-metric-tabs">
+                            <button class="metric-tab active" data-metric="sessions">Sessions</button>
+                            <button class="metric-tab" data-metric="users">Users</button>
+                            <button class="metric-tab" data-metric="conversions">Konverzie</button>
+                            <button class="metric-tab" data-metric="purchase_revenue">Revenue</button>
+                        </div>
+                    </div>
+                    <div class="chart-wrap">
+                        <canvas id="overview-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Súčet segmentu (suma vybraných účtov)</h2>
+                        <span class="hint">Stúpa alebo klesá segment ako celok?</span>
+                    </div>
+                    <div class="chart-wrap chart-small">
+                        <canvas id="overview-segment-chart"></canvas>
+                    </div>
+                    <div id="overview-segment-summary" style="margin-top:10px; font-size:13px; color:var(--text-dim)"></div>
                 </div>
 
                 <div class="section-block">

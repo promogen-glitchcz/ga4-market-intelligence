@@ -34,6 +34,13 @@ function daysAgoISO(n) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+function periodRange() {
+  if (App.state.period === 'custom') {
+    return { start: App.state.customStart || daysAgoISO(30), end: App.state.customEnd || todayISO() };
+  }
+  return { start: daysAgoISO(App.state.period), end: todayISO() };
+}
+
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) throw new Error(`API ${path} ${r.status}`);
@@ -75,8 +82,28 @@ function bindFilters() {
     loadView(App.state.activeView);
   });
   $('filter-period').addEventListener('change', e => {
-    App.state.period = parseInt(e.target.value);
+    if (e.target.value === 'custom') {
+      $('filter-custom-dates').style.display = '';
+      const today = todayISO();
+      const m = daysAgoISO(30);
+      $('filter-date-start').value = m;
+      $('filter-date-end').value = today;
+      App.state.customStart = m;
+      App.state.customEnd = today;
+      App.state.period = 'custom';
+    } else {
+      $('filter-custom-dates').style.display = 'none';
+      App.state.period = parseInt(e.target.value);
+    }
     loadView(App.state.activeView);
+  });
+  $('filter-date-start').addEventListener('change', e => {
+    App.state.customStart = e.target.value;
+    if (App.state.period === 'custom') loadView(App.state.activeView);
+  });
+  $('filter-date-end').addEventListener('change', e => {
+    App.state.customEnd = e.target.value;
+    if (App.state.period === 'custom') loadView(App.state.activeView);
   });
   $('btn-toggle-accounts').addEventListener('click', () => {
     $('accounts-dropdown').classList.toggle('hidden');
@@ -130,12 +157,20 @@ function bindControls() {
   });
 
   // Metric tabs (dashboard)
-  $$('.metric-tab').forEach(t => {
+  $$('#view-dashboard .metric-tab').forEach(t => {
     t.addEventListener('click', () => {
-      $$('.metric-tab').forEach(x => x.classList.remove('active'));
+      t.parentElement.querySelectorAll('.metric-tab').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       App.state.activeMetric = t.dataset.metric;
       if (App.state.activeView === 'dashboard') renderMultiChart();
+    });
+  });
+  $$('#overview-metric-tabs .metric-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      t.parentElement.querySelectorAll('.metric-tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      App.state.overviewMetric = t.dataset.metric;
+      if (App.state.activeView === 'overview') renderOverviewChart();
     });
   });
 
@@ -280,7 +315,122 @@ async function loadView(view) {
 async function loadOverview() {
   await renderSegmentsGrid();
   await renderAccountStrip();
+  await renderOverviewChart();
+  await renderOverviewSegmentChart();
   await loadOverviewInsights();
+}
+
+async function renderOverviewChart() {
+  const ids = [...App.state.selectedAccountIds];
+  const { start, end } = periodRange();
+  const canvas = $('overview-chart');
+  if (!canvas) return;
+  if (!ids.length) {
+    if (App.charts.overview) { App.charts.overview.destroy(); delete App.charts.overview; }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const metric = App.state.overviewMetric || 'sessions';
+  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=${metric}&start=${start}&end=${end}`);
+  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
+  const datasets = data.series.map((s, i) => ({
+    label: s.display_name,
+    data: s.data.map(d => ({ x: d.date, y: d.value })),
+    borderColor: colors[i % colors.length],
+    borderWidth: 2,
+    fill: false,
+    pointRadius: 0,
+    tension: 0.2,
+  }));
+  if (App.charts.overview) App.charts.overview.destroy();
+  App.charts.overview = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 12 } },
+        tooltip: { backgroundColor: '#1a2230', borderColor: '#1f2a3a', borderWidth: 1 },
+      },
+      scales: {
+        x: { type: 'time', time: { unit: 'day' }, ticks: { color: '#94a3b8', maxRotation: 0 }, grid: { color: '#1f2a3a' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+      },
+    },
+  });
+}
+
+async function renderOverviewSegmentChart() {
+  const ids = [...App.state.selectedAccountIds];
+  const { start, end } = periodRange();
+  const canvas = $('overview-segment-chart');
+  if (!canvas) return;
+  const summary = $('overview-segment-summary');
+  if (!ids.length) {
+    if (App.charts.segChart) { App.charts.segChart.destroy(); delete App.charts.segChart; }
+    summary.innerHTML = '<em style="color:var(--text-faint)">Vyber aspoň 1 účet hore aby si videl agregovaný trend.</em>';
+    return;
+  }
+  // Aggregate sessions across selected accounts
+  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=sessions&start=${start}&end=${end}`);
+  const dateMap = {};
+  data.series.forEach(s => s.data.forEach(d => {
+    dateMap[d.date] = (dateMap[d.date] || 0) + d.value;
+  }));
+  const points = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+  if (!points.length) { summary.innerHTML = '<em>Žiadne dáta v zvolenom období.</em>'; return; }
+
+  // Compute simple linear trend
+  const ys = points.map(p => p.y);
+  const xs = points.map((_, i) => i);
+  const n = ys.length;
+  const sumX = xs.reduce((a,b) => a+b, 0);
+  const sumY = ys.reduce((a,b) => a+b, 0);
+  const sumXY = xs.reduce((s, x, i) => s + x*ys[i], 0);
+  const sumX2 = xs.reduce((s, x) => s + x*x, 0);
+  const slope = (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX || 1);
+  const intercept = (sumY - slope*sumX) / n;
+  const trendline = xs.map(x => ({ x: points[x].x, y: slope*x + intercept }));
+  const avg = sumY / n;
+  const pctPerDay = avg > 0 ? slope/avg*100 : 0;
+  const totalChange = pctPerDay * n;
+  const direction = totalChange > 5 ? '📈 RASTIE' : totalChange < -5 ? '📉 PADÁ' : '➡️ STAGNUJE';
+  const color = totalChange > 5 ? '#22c55e' : totalChange < -5 ? '#ef4444' : '#94a3b8';
+
+  if (App.charts.segChart) App.charts.segChart.destroy();
+  App.charts.segChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Súčet sessions', data: points, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.15)', fill: true, borderWidth: 2.5, pointRadius: 0, tension: 0.3 },
+        { label: 'Trendline', data: trendline, borderColor: color, borderDash: [6,4], borderWidth: 2, fill: false, pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 12 } },
+      },
+      scales: {
+        x: { type: 'time', time: { unit: 'day' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+      },
+    },
+  });
+
+  const total = sumY;
+  const days = n;
+  summary.innerHTML = `
+    <div style="display:flex; gap:18px; flex-wrap:wrap">
+      <div><strong style="color:${color}">${direction}</strong></div>
+      <div>Celkom za obdobie: <strong>${fmt(total)}</strong> sessions</div>
+      <div>Priemerne / deň: <strong>${fmt(avg)}</strong></div>
+      <div>Trend: <strong style="color:${color}">${fmtPct(pctPerDay)}</strong> / deň (${fmtPct(totalChange)} za ${days} dní)</div>
+      <div>Vybraných účtov: <strong>${ids.length}</strong></div>
+    </div>
+  `;
 }
 
 async function renderSegmentsGrid() {
@@ -317,8 +467,7 @@ async function renderAccountStrip() {
     $('account-strip').innerHTML = '<div class="empty-state">Vyber účty vo filtri hore (▾ Vybrať účty).</div>';
     return;
   }
-  const start = daysAgoISO(App.state.period);
-  const end = todayISO();
+  const { start, end } = periodRange();
   const data = await api(`/api/metrics/account_strip?property_ids=${ids.join(',')}&start=${start}&end=${end}`);
   const wrap = $('account-strip');
   wrap.innerHTML = '';
@@ -389,8 +538,7 @@ async function loadDashboard() {
 
 async function renderMultiChart() {
   const ids = [...App.state.selectedAccountIds];
-  const start = daysAgoISO(App.state.period);
-  const end = todayISO();
+  const { start, end } = periodRange();
   if (!ids.length) {
     if (App.charts.multi) { App.charts.multi.destroy(); delete App.charts.multi; }
     $('multi-chart').parentElement.innerHTML = '<canvas id="multi-chart"></canvas><div class="empty-state">Vyber účty.</div>';
@@ -431,8 +579,7 @@ async function renderMultiChart() {
 async function renderChannelBreakdown() {
   const ids = [...App.state.selectedAccountIds];
   if (!ids.length) { $('channel-breakdown').innerHTML = '<div class="empty-state">Vyber účty.</div>'; return; }
-  const start = daysAgoISO(App.state.period);
-  const end = todayISO();
+  const { start, end } = periodRange();
   const data = await api(`/api/metrics/channel?property_ids=${ids.join(',')}&start=${start}&end=${end}`);
   // Aggregate across all selected accounts
   const totals = {};
@@ -457,8 +604,7 @@ async function renderChannelBreakdown() {
 async function renderDOWChart() {
   const ids = [...App.state.selectedAccountIds];
   if (!ids.length) { return; }
-  const start = daysAgoISO(App.state.period);
-  const end = todayISO();
+  const { start, end } = periodRange();
   const data = await api(`/api/correlations/dow?property_ids=${ids.join(',')}&start=${start}&end=${end}&metric=sessions`);
   if (!data.available) return;
   const labels = data.by_day.map(d => d.day);
