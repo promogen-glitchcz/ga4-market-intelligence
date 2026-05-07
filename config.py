@@ -33,8 +33,8 @@ INSIGHT_REFINE_INTERVAL = 60 * 60 * 6 # 6h: review old insights, suppress duplic
 PATTERN_HUNT_INTERVAL = 60 * 60       # 1h: hunt for new patterns across segments
 
 # Default windows
-DEFAULT_LOOKBACK_DAYS = 90
-DEEP_LOOKBACK_DAYS = 730              # 2y for seasonality
+DEFAULT_LOOKBACK_DAYS = 395            # 13 months — enough for YoY comparison
+DEEP_LOOKBACK_DAYS = 730               # 2y for seasonality
 
 # Anomaly thresholds
 ANOMALY_Z_SCORE = 2.5

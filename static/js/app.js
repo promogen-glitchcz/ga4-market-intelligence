@@ -35,10 +35,24 @@ function daysAgoISO(n) {
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 function periodRange() {
-  if (App.state.period === 'custom') {
+  const p = App.state.period;
+  if (p === 'custom') {
     return { start: App.state.customStart || daysAgoISO(30), end: App.state.customEnd || todayISO() };
   }
-  return { start: daysAgoISO(App.state.period), end: todayISO() };
+  if (typeof p === 'string' && p.startsWith('year_')) {
+    const yr = parseInt(p.split('_')[1]);
+    return { start: `${yr}-01-01`, end: `${yr}-12-31` };
+  }
+  if (p === 'ytd') {
+    const today = new Date();
+    return { start: `${today.getFullYear()}-01-01`, end: todayISO() };
+  }
+  if (p === 'mtd') {
+    const today = new Date();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    return { start: `${today.getFullYear()}-${m}-01`, end: todayISO() };
+  }
+  return { start: daysAgoISO(p), end: todayISO() };
 }
 
 function yoyShiftDate(iso) {
@@ -105,7 +119,8 @@ function bindFilters() {
     loadView(App.state.activeView);
   });
   $('filter-period').addEventListener('change', e => {
-    if (e.target.value === 'custom') {
+    const v = e.target.value;
+    if (v === 'custom') {
       $('filter-custom-dates').style.display = '';
       const today = todayISO();
       const m = daysAgoISO(30);
@@ -114,9 +129,12 @@ function bindFilters() {
       App.state.customStart = m;
       App.state.customEnd = today;
       App.state.period = 'custom';
+    } else if (v.startsWith('year_') || v === 'ytd' || v === 'mtd') {
+      $('filter-custom-dates').style.display = 'none';
+      App.state.period = v;
     } else {
       $('filter-custom-dates').style.display = 'none';
-      App.state.period = parseInt(e.target.value);
+      App.state.period = parseInt(v);
     }
     loadView(App.state.activeView);
   });
