@@ -41,6 +41,29 @@ function periodRange() {
   return { start: daysAgoISO(App.state.period), end: todayISO() };
 }
 
+function yoyShiftDate(iso) {
+  // Subtract ~365 days (approximation, ignores leap year)
+  const d = new Date(iso);
+  d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function yoyRange() {
+  const { start, end } = periodRange();
+  return { start: yoyShiftDate(start), end: yoyShiftDate(end) };
+}
+
+async function fetchTimeseriesWithYoY(ids, metric) {
+  const { start, end } = periodRange();
+  const promises = [api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=${metric}&start=${start}&end=${end}`)];
+  if (App.state.yoyEnabled) {
+    const y = yoyRange();
+    promises.push(api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=${metric}&start=${y.start}&end=${y.end}`));
+  }
+  const [cur, prev] = await Promise.all(promises);
+  return { current: cur, previous: prev };
+}
+
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) throw new Error(`API ${path} ${r.status}`);
@@ -104,6 +127,10 @@ function bindFilters() {
   $('filter-date-end').addEventListener('change', e => {
     App.state.customEnd = e.target.value;
     if (App.state.period === 'custom') loadView(App.state.activeView);
+  });
+  $('filter-yoy').addEventListener('change', e => {
+    App.state.yoyEnabled = e.target.checked;
+    loadView(App.state.activeView);
   });
   $('btn-toggle-accounts').addEventListener('click', () => {
     $('accounts-dropdown').classList.toggle('hidden');
@@ -431,7 +458,7 @@ async function renderOverviewChart() {
     return;
   }
   const metric = App.state.overviewMetric || 'sessions';
-  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=${metric}&start=${start}&end=${end}`);
+  const { current: data, previous: yoyData } = await fetchTimeseriesWithYoY(ids, metric);
   const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
   const datasets = data.series.map((s, i) => ({
     label: s.display_name,
@@ -442,6 +469,23 @@ async function renderOverviewChart() {
     pointRadius: 0,
     tension: 0.2,
   }));
+  // YoY overlay - shifted forward by 1 year so it aligns with current
+  if (yoyData) {
+    yoyData.series.forEach((s, i) => {
+      const shifted = s.data.map(d => {
+        const dt = new Date(d.date); dt.setFullYear(dt.getFullYear() + 1);
+        return { x: dt.toISOString().slice(0,10), y: d.value };
+      });
+      if (shifted.length) datasets.push({
+        label: `${s.display_name} (loni)`,
+        data: shifted,
+        borderColor: colors[i % colors.length] + '66',
+        borderDash: [4, 4],
+        borderWidth: 1.5,
+        fill: false, pointRadius: 0, tension: 0.2,
+      });
+    });
+  }
 
   // Compute trendline on the SUM across all selected accounts
   const dateMap = {};
@@ -517,8 +561,8 @@ async function renderOverviewSegmentChart() {
     return;
   }
 
-  // Pull all account series in one call
-  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=sessions&start=${start}&end=${end}`);
+  // Pull all account series (current + optionally YoY)
+  const { current: data, previous: yoyData } = await fetchTimeseriesWithYoY(ids, 'sessions');
 
   // Aggregate (segment sum)
   const dateMap = {};
@@ -560,6 +604,22 @@ async function renderOverviewSegmentChart() {
       hidden: false,
     }));
 
+  // Build YoY sum if enabled
+  let yoySumPoints = null;
+  let yoyTotal = null;
+  let yoyDelta = null;
+  if (yoyData) {
+    const ymap = {};
+    yoyData.series.forEach(s => s.data.forEach(d => {
+      const dt = new Date(d.date); dt.setFullYear(dt.getFullYear() + 1);
+      const key = dt.toISOString().slice(0,10);
+      ymap[key] = (ymap[key] || 0) + d.value;
+    }));
+    yoySumPoints = Object.entries(ymap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+    yoyTotal = yoySumPoints.reduce((s, p) => s + p.y, 0);
+    yoyDelta = yoyTotal > 0 ? (sumY - yoyTotal) / yoyTotal * 100 : null;
+  }
+
   if (App.charts.segChart) App.charts.segChart.destroy();
   App.charts.segChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -569,6 +629,15 @@ async function renderOverviewSegmentChart() {
         { label: 'Součet segmentu', data: sumPoints, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.12)', fill: true, borderWidth: 3, pointRadius: 0, tension: 0.3, order: 0 },
         // Trendline
         { label: 'Trendline', data: trendline, borderColor: trendColor, borderDash: [6,4], borderWidth: 2, fill: false, pointRadius: 0, order: 1 },
+        // YoY sum (loni)
+        ...(yoySumPoints ? [{
+          label: 'Loňský rok',
+          data: yoySumPoints,
+          borderColor: '#a855f7',
+          borderDash: [4, 4],
+          borderWidth: 2,
+          fill: false, pointRadius: 0, tension: 0.3, order: 1,
+        }] : []),
         // Per-account thin lines
         ...accountDatasets.map(d => ({ ...d, order: 2 })),
       ],
@@ -587,11 +656,15 @@ async function renderOverviewSegmentChart() {
     },
   });
 
+  const yoyLabel = (yoyDelta != null)
+    ? `<div>Loni: <strong>${fmt(yoyTotal)}</strong> · YoY: <strong style="color:${yoyDelta >= 0 ? '#22c55e' : '#ef4444'}">${fmtPct(yoyDelta)}</strong></div>`
+    : '';
   summary.innerHTML = `
     <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:center">
       <div><strong style="color:${trendColor}; font-size:14px">${direction}</strong></div>
       <div>${title}</div>
       <div>Celkem za období: <strong>${fmt(sumY)}</strong> sessions</div>
+      ${yoyLabel}
       <div>Průměr / den: <strong>${fmt(avg)}</strong></div>
       <div>Trend: <strong style="color:${trendColor}">${fmtPct(pctPerDay)}</strong> / den (${fmtPct(totalChange)} za ${n} dní)</div>
     </div>

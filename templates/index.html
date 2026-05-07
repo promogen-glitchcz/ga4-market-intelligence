@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }}</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=5">
+    <link rel="stylesheet" href="/static/css/style.css?v=6">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -97,6 +97,13 @@
                     </div>
                     <div id="accounts-list" class="accounts-list"></div>
                 </div>
+            </div>
+            <div class="filter-group">
+                <label>Porovnání</label>
+                <label class="yoy-toggle">
+                    <input type="checkbox" id="filter-yoy" />
+                    <span>Meziročně (YoY)</span>
+                </label>
             </div>
             <div class="filter-spacer"></div>
             <button id="btn-refresh" class="btn btn-primary" title="Aktualizuj data">↻ Aktualizovat</button>
@@ -329,6 +336,6 @@
     </main>
 </div>
 
-<script src="/static/js/app.js?v=5"></script>
+<script src="/static/js/app.js?v=6"></script>
 </body>
 </html>

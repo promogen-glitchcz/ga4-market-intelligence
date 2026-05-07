@@ -460,6 +460,20 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   font-size: 11px;
 }
 
+/* YoY toggle */
+.yoy-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.yoy-toggle input { margin: 0; }
+.yoy-toggle:hover { background: var(--bg-elevated); }
+
 /* Segment add popover */
 .seg-add-popover {
   background: var(--bg-card);
