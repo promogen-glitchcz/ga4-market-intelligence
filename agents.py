@@ -10,8 +10,12 @@ from typing import Callable
 import database as db
 import intelligence as intel
 import analyzer as az
+import analyzer as analyzer  # alias for briefing
 import correlations as cor
 from ga4_api import days_ago, today_iso
+
+def _days_ago_str(n): return days_ago(n)
+def _today_str(): return today_iso()
 
 logger = logging.getLogger("ga4.agents")
 
@@ -140,43 +144,90 @@ def agent_forecaster() -> dict:
 # ─────────────── Agent: Daily briefing ───────────────
 
 def agent_daily_briefing() -> dict:
-    """Compose 1-page market read for today, save to DB."""
+    """Compose detailed market read with best/worst account per segment."""
     run_id = db.start_agent_run("briefing")
     today = date.today().isoformat()
     try:
         segments = db.list_segments()
-        seg_lines = []
+        seg_blocks = []
         critical_count = 0
         good_count = 0
+
+        accounts_map = {a["property_id"]: a for a in db.list_accounts()}
+
         for seg in segments:
+            if seg.get("account_count", 0) == 0:
+                continue
             h = db.latest_health_score(seg["slug"])
-            if not h: continue
-            score = h["score"]
-            verdict = h["verdict"]
+            score = h["score"] if h else None
+            verdict = h["verdict"] if h else "unknown"
             if verdict == "critical": critical_count += 1
             elif verdict in ("good", "excellent"): good_count += 1
-            seg_lines.append(f"  {seg['icon']} **{seg['name']}**: {score}/100 ({intel.verdict_text(verdict)})")
 
-        total_accounts = sum(s["account_count"] for s in segments)
-        latest_alerts = db.list_alerts(limit=5)
+            # For each segment compute YoY-like rankings: best riser, worst faller
+            account_ids = db.accounts_in_segment(seg["slug"])
+            movers = []
+            for pid in account_ids:
+                rows = db.query_daily_metrics([pid], analyzer.days_ago(60), analyzer.today_iso()) if hasattr(analyzer, 'days_ago') else db.query_daily_metrics([pid], _days_ago_str(60), _today_str())
+                if len(rows) < 14: continue
+                series = az.to_series(rows, metric="sessions")
+                if len(series) < 14: continue
+                cur7 = series.tail(7).sum()
+                prev7 = series.iloc[-14:-7].sum()
+                if prev7 < 5: continue
+                pct = (cur7 - prev7) / prev7 * 100
+                rev_series = az.to_series(rows, metric="purchase_revenue")
+                cur_rev = float(rev_series.tail(7).sum()) if len(rev_series) else 0
+                movers.append({
+                    "pid": pid,
+                    "name": accounts_map.get(pid, {}).get("display_name", pid),
+                    "wow_pct": pct,
+                    "cur_sessions": int(cur7),
+                    "prev_sessions": int(prev7),
+                    "cur_revenue": cur_rev,
+                })
 
-        if not seg_lines:
-            headline = "Žiadne segmenty s dátami — pridaj účty a otaguj segmenty"
-            body = "Stav: čaká sa na sync GA4 dát. Otvor /accounts a priraď účty segmentom."
+            if movers:
+                movers.sort(key=lambda x: x["wow_pct"])
+                worst = movers[0] if movers[0]["wow_pct"] < 0 else None
+                best = movers[-1] if movers[-1]["wow_pct"] > 0 else None
+                total_sessions = sum(m["cur_sessions"] for m in movers)
+                total_rev = sum(m["cur_revenue"] for m in movers)
+                rising = sum(1 for m in movers if m["wow_pct"] > 5)
+                falling = sum(1 for m in movers if m["wow_pct"] < -5)
+
+                lines = [f"\n{seg['icon']} **{seg['name']}** — Health: **{score}/100** ({intel.verdict_text(verdict)})"]
+                lines.append(f"  • {len(movers)} aktivních účtů · WoW: {rising} rostou, {falling} padají, {len(movers)-rising-falling} stagnuje")
+                lines.append(f"  • Týdenní součet: **{total_sessions:,}** sessions, **{total_rev:,.0f} Kč** tržby")
+                if best:
+                    lines.append(f"  • 📈 Nejlepší: **{best['name']}** ({best['wow_pct']:+.1f}% WoW, {best['cur_sessions']:,} sessions)")
+                if worst:
+                    lines.append(f"  • 📉 Nejhorší: **{worst['name']}** ({worst['wow_pct']:+.1f}% WoW, {worst['cur_sessions']:,} sessions)")
+                seg_blocks.append("\n".join(lines))
+            else:
+                seg_blocks.append(f"\n{seg['icon']} **{seg['name']}** — {seg['account_count']} účtů, čekám na data")
+
+        latest_alerts = db.list_alerts(limit=8)
+        total_accounts = sum(s["account_count"] for s in segments if s.get("account_count", 0) > 0)
+        active_segments = sum(1 for s in segments if s.get("account_count", 0) > 0)
+
+        if not seg_blocks:
+            headline = "Žádné segmenty s daty — přiřaď účty"
+            body = 'Otevři **Účty** a klikni "+ přidat" u každého účtu.'
         else:
             if critical_count >= 2:
-                headline = f"⚠️ {critical_count} segmentov v kritickom stave"
-            elif good_count >= max(1, len(segments) // 2):
-                headline = f"✅ Trh stabilný — {good_count} segmentov v dobrej kondícii"
+                headline = f"⚠️ {critical_count} segmentů v kritickém stavu"
+            elif good_count >= max(1, active_segments // 2):
+                headline = f"✅ Trh stabilní — {good_count} segmentů v dobré kondici"
             else:
-                headline = f"🔍 Zmiešané signály — {len(segments)} segmentov skenovaných"
+                headline = f"🔍 Smíšené signály — {active_segments} segmentů aktivních"
 
-            body_parts = ["**Stav segmentov:**"] + seg_lines
+            body_parts = [f"**Sledováno {active_segments} segmentů, {total_accounts} účtů**"]
+            body_parts.extend(seg_blocks)
             if latest_alerts:
-                body_parts.append("\n**Posledné alerty:**")
-                for a in latest_alerts[:5]:
+                body_parts.append("\n**🚨 Poslední kritické alerty:**")
+                for a in latest_alerts[:8]:
                     body_parts.append(f"  • {a['title']}")
-            body_parts.append(f"\n**Celkom účtov pod monitoringom:** {total_accounts}")
             body = "\n".join(body_parts)
 
         db.save_briefing(today, headline, body, {

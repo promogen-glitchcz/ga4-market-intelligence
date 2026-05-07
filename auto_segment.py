@@ -11,6 +11,8 @@ logger = logging.getLogger("ga4.auto_segment")
 
 # Keyword → segment slug rules (Czech/Slovak/English combined)
 RULES: list[tuple[str, str]] = [
+    # Hry / gaming
+    (r"\b(hern[ií]|hry|gaming|game|hraj)\b", "hry"),
     # papierníctvo / kanc. potreby
     (r"\b(papír|papir|sevt|pavlik|originalniknihy|tisk|print|stickies)\b", "papierenstvo"),
     # knihy
@@ -24,7 +26,9 @@ RULES: list[tuple[str, str]] = [
     # zahrada / drevo
     (r"\b(zahra|garden|drev|wood|palivov|nvdrev|nvpalivov)\b", "zahrada"),
     # uklid
-    (r"\b(uklid|clean|čisti|cisti|admasys)\b", "uklid"),
+    (r"\b(uklid|clean|čisti|cisti)\b", "uklid"),
+    # tisk / print
+    (r"\b(tisk|print|admasys|tisk[a-z]*)\b", "tisk"),
     # moda
     (r"\b(moda|fashion|jeans|underwear|stylestyle|kenvelo|baagl|bonek|byvm|enjoy[-_]?style|trenyrk|nedeto|exe[-_]?jeans|timeoutjeans)\b", "moda"),
     # potraviny / drink

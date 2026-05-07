@@ -74,13 +74,14 @@ def detect_anomalies_iqr(series: pd.Series, window: int = 28) -> pd.DataFrame:
 
 def linear_trend(series: pd.Series) -> dict:
     """Simple linear regression on time series. Returns slope (per day), intercept, r2."""
+    empty = {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0, "pct_per_day": 0.0, "trend": "flat"}
     if len(series) < 7:
-        return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0, "trend": "flat"}
+        return empty
     x = np.arange(len(series))
     y = series.values.astype(float)
     mask = ~np.isnan(y)
     if mask.sum() < 7:
-        return {"slope": 0.0, "intercept": 0.0, "r_squared": 0.0, "trend": "flat"}
+        return empty
     x, y = x[mask], y[mask]
     slope, intercept = np.polyfit(x, y, 1)
     y_pred = slope * x + intercept

@@ -318,6 +318,34 @@ def api_create_segment(body: SegmentCreateBody):
     return {"ok": True}
 
 
+class BulkAssignBody(BaseModel):
+    property_ids: list[str]
+    segment_slug: str
+    replace: bool = True  # if True, remove existing segments first
+
+
+@app.post("/api/accounts/bulk_assign")
+def api_bulk_assign(body: BulkAssignBody):
+    """Bulk-assign multiple accounts to one segment. If replace=True, clear other tags first."""
+    moved = 0
+    with db.sqlite_conn() as c:
+        for pid in body.property_ids:
+            if body.replace:
+                c.execute("DELETE FROM account_segments WHERE property_id = ?", (pid,))
+            c.execute("INSERT OR IGNORE INTO account_segments (property_id, segment_slug) VALUES (?, ?)",
+                      (pid, body.segment_slug))
+            moved += 1
+    return {"ok": True, "moved": moved, "segment": body.segment_slug}
+
+
+@app.post("/api/accounts/reset_segments")
+def api_reset_all_segments():
+    """Wipe all account-segment assignments. Use before re-running classification."""
+    with db.sqlite_conn() as c:
+        n = c.execute("DELETE FROM account_segments").rowcount
+    return {"ok": True, "removed": n}
+
+
 # ─────────────── API: data ───────────────
 
 @app.get("/api/metrics/daily")
@@ -362,7 +390,11 @@ def api_account_strip(property_ids: str, start: str, end: str):
     accounts = {a["property_id"]: a for a in db.list_accounts()}
     out = []
     for pid in pids:
-        rows = db.query_daily_metrics([pid], start, end)
+        try:
+            rows = db.query_daily_metrics([pid], start, end)
+        except Exception as e:
+            logger.warning(f"  query failed for {pid}: {e}")
+            rows = []
         if not rows:
             out.append({
                 "property_id": pid,
@@ -371,26 +403,37 @@ def api_account_strip(property_ids: str, start: str, end: str):
                 "no_data": True,
             })
             continue
-        sessions = [r["sessions"] or 0 for r in rows]
-        users = [r["users"] or 0 for r in rows]
-        rev = [r["purchase_revenue"] or 0 for r in rows]
-        conv = [r["conversions"] or 0 for r in rows]
-        eng = [r["engaged_sessions"] or 0 for r in rows]
+        try:
+            sessions = [r["sessions"] or 0 for r in rows]
+            users = [r["users"] or 0 for r in rows]
+            rev = [r["purchase_revenue"] or 0 for r in rows]
+            conv = [r["conversions"] or 0 for r in rows]
+            eng = [r["engaged_sessions"] or 0 for r in rows]
 
-        s_total = sum(sessions); u_total = sum(users); r_total = sum(rev)
-        c_total = sum(conv); e_total = sum(eng)
-        cr = c_total / s_total * 100 if s_total else 0
-        eng_rate = e_total / s_total * 100 if s_total else 0
+            s_total = sum(sessions); u_total = sum(users); r_total = sum(rev)
+            c_total = sum(conv); e_total = sum(eng)
+            cr = c_total / s_total * 100 if s_total else 0
+            eng_rate = e_total / s_total * 100 if s_total else 0
 
-        # Trend over period
-        trend = az.linear_trend(az.to_series(rows, metric="sessions"))
+            # Trend over period
+            trend = az.linear_trend(az.to_series(rows, metric="sessions"))
 
-        # YoY (use longer lookback)
-        yoy_rows = db.query_daily_metrics([pid], days_ago(395), today_iso())
-        yoy = az.yoy_change(az.to_series(yoy_rows, metric="sessions"), date.fromisoformat(end))
+            # YoY (use longer lookback)
+            yoy_rows = db.query_daily_metrics([pid], days_ago(395), today_iso())
+            yoy = az.yoy_change(az.to_series(yoy_rows, metric="sessions"), date.fromisoformat(end))
 
-        # Compute health
-        health = intel.compute_account_health(yoy_rows)
+            # Compute health
+            health = intel.compute_account_health(yoy_rows)
+        except Exception as e:
+            logger.warning(f"  account_strip computation failed for {pid}: {e}")
+            out.append({
+                "property_id": pid,
+                "display_name": accounts.get(pid, {}).get("display_name", pid),
+                "currency": accounts.get(pid, {}).get("currency_code", ""),
+                "no_data": True,
+                "error": str(e),
+            })
+            continue
 
         out.append({
             "property_id": pid,

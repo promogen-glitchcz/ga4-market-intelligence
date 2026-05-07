@@ -104,12 +104,12 @@ def verdict_from_score(score: float) -> str:
 
 def verdict_text(verdict: str) -> str:
     return {
-        "excellent": "Trh frčí — všetko nadpriemerne",
-        "good": "Trh stabilný / mierne rastúci",
-        "fair": "Trh kolíše — zmiešané signály",
-        "poor": "Trh padá — väčšina účtov pod plán",
-        "critical": "Trh je v riti — všetky účty výrazne zaostávajú",
-        "unknown": "Nedostatok dát",
+        "excellent": "Trh frčí — vše nadprůměrně",
+        "good": "Trh stabilní / mírně rostoucí",
+        "fair": "Trh kolísá — smíšené signály",
+        "poor": "Trh padá — většina účtů pod plán",
+        "critical": "Trh je v riti — všechny účty výrazně zaostávají",
+        "unknown": "Nedostatek dat",
     }.get(verdict, "?")
 
 

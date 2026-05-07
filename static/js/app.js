@@ -459,7 +459,7 @@ async function renderOverviewChart() {
   }
   const metric = App.state.overviewMetric || 'sessions';
   const { current: data, previous: yoyData } = await fetchTimeseriesWithYoY(ids, metric);
-  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
+  const colors = ['#FF6B35', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
   const datasets = data.series.map((s, i) => ({
     label: s.display_name,
     data: s.data.map(d => ({ x: d.date, y: d.value })),
@@ -814,7 +814,7 @@ async function renderMultiChart() {
     return;
   }
   const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=${App.state.activeMetric}&start=${start}&end=${end}`);
-  const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
+  const colors = ['#FF6B35', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
   const datasets = data.series.map((s, i) => ({
     label: s.display_name,
     data: s.data.map(d => ({ x: d.date, y: d.value })),
@@ -987,23 +987,63 @@ async function renderSegmentDetail(slug) {
     </table>
   `;
 
-  // Multi-line chart
-  const data = await api(`/api/metrics/timeseries?property_ids=${ids.join(',')}&metric=sessions&start=${start}&end=${end}`);
+  // Multi-line chart with trendline + YoY
+  const { current: data, previous: yoyData } = await fetchTimeseriesWithYoY(ids, 'sessions');
   const dateMap = {};
   data.series.forEach(s => s.data.forEach(d => { dateMap[d.date] = (dateMap[d.date] || 0) + d.value; }));
   const sumPoints = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
-  const chartColors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e'];
+  const chartColors = ['#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e', '#fbbf24'];
+
+  // Trendline
+  let trendDataset = null;
+  if (sumPoints.length >= 2) {
+    const ys = sumPoints.map(p => p.y);
+    const xs = sumPoints.map((_, i) => i);
+    const n = ys.length;
+    const sumX = xs.reduce((a,b) => a+b, 0);
+    const sumY = ys.reduce((a,b) => a+b, 0);
+    const sumXY = xs.reduce((s, x, i) => s + x*ys[i], 0);
+    const sumX2 = xs.reduce((s, x) => s + x*x, 0);
+    const slope = (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX || 1);
+    const intercept = (sumY - slope*sumX) / n;
+    const avg = sumY / n;
+    const totalChange = (avg > 0 ? slope/avg*100 : 0) * n;
+    const tcolor = totalChange > 5 ? '#22c55e' : totalChange < -5 ? '#ef4444' : '#94a3b8';
+    trendDataset = {
+      label: `Trendline (${fmtPct(totalChange)} za období)`,
+      data: xs.map(x => ({ x: sumPoints[x].x, y: slope*x + intercept })),
+      borderColor: tcolor,
+      borderDash: [6, 4],
+      borderWidth: 2.5, fill: false, pointRadius: 0, order: 1,
+    };
+  }
+
+  // YoY sum overlay
+  let yoySumDataset = null;
+  if (yoyData) {
+    const ymap = {};
+    yoyData.series.forEach(s => s.data.forEach(d => {
+      const dt = new Date(d.date); dt.setFullYear(dt.getFullYear() + 1);
+      const key = dt.toISOString().slice(0,10);
+      ymap[key] = (ymap[key] || 0) + d.value;
+    }));
+    const ypts = Object.entries(ymap).sort((a,b) => a[0].localeCompare(b[0])).map(([d,v]) => ({ x: d, y: v }));
+    if (ypts.length) yoySumDataset = {
+      label: 'Loňský rok',
+      data: ypts, borderColor: '#a855f7', borderDash: [4, 4],
+      borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3, order: 1,
+    };
+  }
+
   const datasets = [
-    { label: 'Součet segmentu', data: sumPoints, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.12)', fill: true, borderWidth: 3, pointRadius: 0, tension: 0.3, order: 0 },
+    { label: 'Součet segmentu', data: sumPoints, borderColor: '#FF6B35', backgroundColor: 'rgba(255,107,53,0.15)', fill: true, borderWidth: 3, pointRadius: 0, tension: 0.3, order: 0 },
+    ...(trendDataset ? [trendDataset] : []),
+    ...(yoySumDataset ? [yoySumDataset] : []),
     ...data.series.filter(s => s.data.length).map((s, i) => ({
       label: s.display_name,
       data: s.data.map(d => ({ x: d.date, y: d.value })),
       borderColor: chartColors[i % chartColors.length] + 'aa',
-      borderWidth: 1,
-      fill: false,
-      pointRadius: 0,
-      tension: 0.2,
-      order: 2,
+      borderWidth: 1, fill: false, pointRadius: 0, tension: 0.2, order: 2,
     })),
   ];
   const canvas = document.getElementById(`seg-chart-${slug}`);
@@ -1013,8 +1053,10 @@ async function renderSegmentDetail(slug) {
     data: { datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false, axis: 'x' },
       plugins: {
         legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 10, font: { size: 10 } } },
+        tooltip: { backgroundColor: '#1a2230', borderColor: '#FF6B35', borderWidth: 1, padding: 12, titleFont: { size: 13 }, bodyFont: { size: 12 } },
       },
       scales: {
         x: { type: 'time', time: { unit: 'day' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
@@ -1072,8 +1114,20 @@ async function renderAccountsTable() {
   const countLbl = $('accounts-filter-count');
   if (countLbl) countLbl.innerText = `${filtered.length} / ${App.state.accounts.length} účtů`;
 
-  let html = `<table class="accounts-table">
+  // Bulk action bar
+  let bulkBar = `<div id="bulk-action-bar" style="background:var(--bg-elevated); padding:10px 14px; border-radius:8px; margin-bottom:10px; display:none; align-items:center; gap:10px; flex-wrap:wrap">
+    <span><strong id="bulk-count">0</strong> vybraných účtů</span>
+    <select id="bulk-segment-select" style="min-width:240px">
+      <option value="">— vyber segment —</option>
+      ${App.state.segments.map(s => `<option value="${s.slug}">${s.icon} ${s.name}</option>`).join('')}
+    </select>
+    <button class="btn btn-primary" id="bulk-replace-btn">Přesunout (nahradit segmenty)</button>
+    <button class="btn btn-light" id="bulk-add-btn">Přidat (vedle stávajících)</button>
+    <button class="btn-mini" id="bulk-cancel-btn">Zrušit výběr</button>
+  </div>`;
+  let html = bulkBar + `<table class="accounts-table">
     <thead><tr>
+      <th><input type="checkbox" id="bulk-check-all"></th>
       <th>Property ID</th><th>Název</th><th>Účet</th><th>Měna</th><th>Segmenty</th><th>Monitor</th>
     </tr></thead><tbody>`;
   filtered.forEach(a => {
@@ -1083,6 +1137,7 @@ async function renderAccountsTable() {
     }).join('');
     const adder = `<span class="acc-seg-pill adder" data-add-pid="${a.property_id}">+ přidat</span>`;
     html += `<tr>
+      <td><input type="checkbox" class="bulk-check" data-pid="${a.property_id}"></td>
       <td><code>${a.property_id}</code></td>
       <td>${a.display_name}</td>
       <td>${a.parent_account_name || ''}</td>
@@ -1093,6 +1148,43 @@ async function renderAccountsTable() {
   });
   html += '</tbody></table>';
   wrap.innerHTML = html;
+
+  // Bulk selection state
+  const bulkBarEl = $('bulk-action-bar');
+  const updateBulkBar = () => {
+    const selected = wrap.querySelectorAll('.bulk-check:checked');
+    const count = selected.length;
+    if (count > 0) {
+      bulkBarEl.style.display = 'flex';
+      $('bulk-count').textContent = count;
+    } else {
+      bulkBarEl.style.display = 'none';
+    }
+  };
+  wrap.querySelectorAll('.bulk-check').forEach(cb => cb.addEventListener('change', updateBulkBar));
+  $('bulk-check-all').addEventListener('change', e => {
+    wrap.querySelectorAll('.bulk-check').forEach(cb => cb.checked = e.target.checked);
+    updateBulkBar();
+  });
+  const doBulkAssign = async (replace) => {
+    const slug = $('bulk-segment-select').value;
+    if (!slug) { alert('Vyber segment'); return; }
+    const ids = [...wrap.querySelectorAll('.bulk-check:checked')].map(c => c.dataset.pid);
+    if (!ids.length) return;
+    await api('/api/accounts/bulk_assign', {
+      method: 'POST',
+      body: JSON.stringify({ property_ids: ids, segment_slug: slug, replace }),
+    });
+    await loadSegments();
+    renderAccountsTable();
+  };
+  $('bulk-replace-btn').addEventListener('click', () => doBulkAssign(true));
+  $('bulk-add-btn').addEventListener('click', () => doBulkAssign(false));
+  $('bulk-cancel-btn').addEventListener('click', () => {
+    wrap.querySelectorAll('.bulk-check').forEach(cb => cb.checked = false);
+    $('bulk-check-all').checked = false;
+    updateBulkBar();
+  });
 
   // Bind monitor toggles
   wrap.querySelectorAll('[data-mon-pid]').forEach(cb => {
@@ -1319,7 +1411,23 @@ async function loadHypotheses() {
 
 // ── Briefing ──
 
+async function regenerateBriefing() {
+  const btn = $('btn-regen-briefing');
+  if (btn) btn.textContent = '⏳ Generuji…';
+  try {
+    await api('/api/agents/run/briefing', { method: 'POST' });
+    await loadBriefing();
+  } catch(e) { alert('Chyba: ' + e.message); }
+  if (btn) btn.textContent = '↻ Regenerovat teď';
+}
+
 async function loadBriefing() {
+  // Bind regenerate button (idempotent)
+  const btn = $('btn-regen-briefing');
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', regenerateBriefing);
+  }
   const data = await api('/api/briefing');
   const wrap = $('briefing-content');
   if (!data.briefing) {
@@ -1327,10 +1435,18 @@ async function loadBriefing() {
     return;
   }
   const b = data.briefing;
+  const generatedAt = new Date(b.generated_at);
+  const ageMin = Math.floor((Date.now() - generatedAt.getTime()) / 60000);
+  const ageStr = ageMin < 60 ? `před ${ageMin} min` : ageMin < 1440 ? `před ${Math.floor(ageMin/60)} h` : `před ${Math.floor(ageMin/1440)} dny`;
+  // Render markdown-ish (bold + bullets)
+  const html = b.body
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^  • (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.+?<\/li>(\n|$))+/gs, m => '<ul style="margin-left:20px">' + m + '</ul>');
   wrap.innerHTML = `
-    <h2>${b.headline}</h2>
-    <div style="color:var(--text-faint); font-size: 11px; margin-bottom: 12px">${b.briefing_date} · vygenerováno ${new Date(b.generated_at).toLocaleString('cs-CZ')}</div>
-    <div style="white-space: pre-wrap">${b.body}</div>
+    <h2 style="margin-bottom:6px">${b.headline}</h2>
+    <div style="color:var(--text-faint); font-size: 11px; margin-bottom: 16px">${b.briefing_date} · vygenerováno ${generatedAt.toLocaleString('cs-CZ')} (${ageStr})</div>
+    <div style="white-space: pre-wrap; line-height: 1.7">${html}</div>
   `;
 }
 
