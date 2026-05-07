@@ -386,7 +386,7 @@ async function renderSegmentBanner() {
         <span class="sb-icon">${seg.icon}</span>
         <div class="sb-title-block">
           <div class="sb-name">${seg.name}</div>
-          <div class="sb-tag">${seg.account_count} účtov · zatiaľ bez dát</div>
+          <div class="sb-tag">${seg.account_count} účtů · zatím bez dat</div>
         </div>
       </div>
       <div></div>
@@ -433,7 +433,7 @@ async function renderSegmentBanner() {
       <span class="sb-icon">${seg.icon}</span>
       <div class="sb-title-block">
         <div class="sb-name">${seg.name}</div>
-        <div class="sb-tag">${overview.n_accounts} účtov v segmente · ${h.accounts_declining || 0} v poklese</div>
+        <div class="sb-tag">${overview.n_accounts} účtů v segmentu · ${h.accounts_declining || 0} v poklese</div>
       </div>
     </div>
     <div class="sb-mid">${kpiBlock}</div>
@@ -685,21 +685,49 @@ async function renderSegmentsGrid() {
     const verdict = latest?.verdict || 'unknown';
     const score = latest?.score != null ? latest.score : '—';
     wrap.innerHTML += `
-      <div class="seg-card">
+      <div class="seg-card" data-seg-slug="${s.slug}" style="cursor:pointer">
         <div class="seg-card-head">
           <span class="seg-icon">${s.icon}</span>
           <span class="seg-name">${s.name}</span>
           <span class="seg-score-bubble ${verdict}">${score}</span>
         </div>
-        <div class="seg-verdict">${latest?.summary || 'Žiadne dáta'}</div>
+        <div class="seg-verdict">${latest?.summary || 'Žádná data'}</div>
         <div class="seg-meta">
-          <span>📍 ${s.account_count} účtov</span>
+          <span>📍 ${s.account_count} účtů</span>
           ${latest ? `<span>📉 ${latest.accounts_declining || 0} v poklese</span>` : ''}
+        </div>
+        <div style="display:flex; gap:6px; margin-top:6px">
+          <button class="btn-mini seg-card-detail" data-slug="${s.slug}">📊 Otevřít detail</button>
+          <button class="btn-mini seg-card-accounts" data-slug="${s.slug}">📋 Zobrazit účty</button>
         </div>
       </div>
     `;
   }
   if (!wrap.innerHTML) wrap.innerHTML = '<div class="empty-state">Žádné segmenty s daty. Spusť „Spustit agenty".</div>';
+
+  // Bind quick actions
+  wrap.querySelectorAll('.seg-card-detail').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Switch to Segmenty view and open this segment's detail
+      document.querySelector('[data-view="segments"]').click();
+      setTimeout(() => {
+        const row = document.querySelector(`.segment-row[data-segment="${b.dataset.slug}"]`);
+        if (row) {
+          row.querySelector('.seg-toggle').click();
+          row.scrollIntoView({behavior:'smooth', block:'center'});
+        }
+      }, 300);
+    });
+  });
+  wrap.querySelectorAll('.seg-card-accounts').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Jump to Účty view filtered by this segment
+      App.state.accountsSegmentFilter = b.dataset.slug;
+      document.querySelector('[data-view="accounts"]').click();
+    });
+  });
 }
 
 async function renderAccountStrip() {
@@ -1006,11 +1034,49 @@ async function renderAccountsTable() {
     return;
   }
   const segMap = Object.fromEntries(App.state.segments.map(s => [s.slug, s]));
+
+  // Populate segment filter dropdown (sorted by count, only segments with accounts)
+  const segFilter = $('accounts-segment-filter');
+  if (segFilter) {
+    const populated = App.state.segments.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
+    const currentVal = segFilter.value || App.state.accountsSegmentFilter || '';
+    segFilter.innerHTML = '<option value="">Všechny segmenty (' + App.state.accounts.length + ')</option>' +
+      populated.map(s => `<option value="${s.slug}" ${currentVal === s.slug ? 'selected' : ''}>${s.icon} ${s.name} (${s.account_count})</option>`).join('') +
+      '<option value="__none__">Bez segmentu</option>';
+    segFilter.onchange = () => {
+      App.state.accountsSegmentFilter = segFilter.value;
+      renderAccountsTable();
+    };
+  }
+  const nameFilter = $('accounts-name-filter');
+  if (nameFilter) {
+    if (App.state.accountsNameFilter) nameFilter.value = App.state.accountsNameFilter;
+    nameFilter.oninput = () => {
+      App.state.accountsNameFilter = nameFilter.value;
+      renderAccountsTable();
+    };
+  }
+
+  // Apply filters
+  const segFilterVal = App.state.accountsSegmentFilter || '';
+  const nameFilterVal = (App.state.accountsNameFilter || '').toLowerCase();
+  let filtered = App.state.accounts;
+  if (segFilterVal === '__none__') {
+    filtered = filtered.filter(a => !a.segments || a.segments.length === 0);
+  } else if (segFilterVal) {
+    filtered = filtered.filter(a => (a.segments || []).includes(segFilterVal));
+  }
+  if (nameFilterVal) {
+    filtered = filtered.filter(a => a.display_name.toLowerCase().includes(nameFilterVal) || a.property_id.includes(nameFilterVal));
+  }
+  const countLbl = $('accounts-filter-count');
+  if (countLbl) countLbl.innerText = `${filtered.length} / ${App.state.accounts.length} účtů`;
+
   let html = `<table class="accounts-table">
     <thead><tr>
       <th>Property ID</th><th>Název</th><th>Účet</th><th>Měna</th><th>Segmenty</th><th>Monitor</th>
     </tr></thead><tbody>`;
-  App.state.accounts.forEach(a => {
+  filtered.forEach(a => {
     const segs = (a.segments || []).map(slug => {
       const s = segMap[slug];
       return s ? `<span class="acc-seg-pill">${s.icon} ${s.name}<span class="x" data-rm-pid="${a.property_id}" data-rm-slug="${slug}">×</span></span>` : '';
