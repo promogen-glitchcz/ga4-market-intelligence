@@ -495,7 +495,7 @@ async function renderMainChart() {
   if (tlMetric && App.state.selectedMetrics.includes(tlMetric)) {
     const meta = METRIC_META[tlMetric];
 
-    function addTrendline(seriesData, label, dashColor, dashStyle) {
+    function addTrendline(seriesData, label, color, dashStyle, lineWidth) {
       if (seriesData.length < 2) return;
       const ys = seriesData.map(p => p.value);
       const xs = seriesData.map((_, i) => i);
@@ -508,21 +508,36 @@ async function renderMainChart() {
       const intercept = (sumY - slope*sumX) / n;
       const avg = sumY / n;
       const totalPct = avg > 0 ? slope/avg*100 * n : 0;
-      const computed = dashColor || (totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8');
+      const arrow = totalPct > 0.5 ? '↗' : totalPct < -0.5 ? '↘' : '→';
       datasets.push({
-        label: `${label} (${fmtPct(totalPct)})`,
+        label: `${arrow} ${label} ${fmtPct(totalPct)}`,
         data: xs.map(x => ({ x: seriesData[x].week_start, y: slope*x + intercept })),
-        borderColor: computed,
-        borderDash: dashStyle || [8, 4],
-        borderWidth: 2, fill: false, pointRadius: 0,
+        borderColor: color,
+        borderDash: dashStyle,
+        borderWidth: lineWidth,
+        fill: false, pointRadius: 0,
         yAxisID: meta.axis,
         order: 0,
       });
     }
 
-    addTrendline(data.series[tlMetric] || [], `Trend ${meta.label}`);
+    // Current trendline: metric's color, thicker, long-dash style
+    addTrendline(
+      data.series[tlMetric] || [],
+      `Trend ${meta.label}`,
+      meta.color,
+      [12, 6],
+      3,
+    );
+    // YoY trendline: dark gray, thinner, dotted
     if (data.yoy_series && data.yoy_series[tlMetric]) {
-      addTrendline(data.yoy_series[tlMetric], `Trend ${meta.label} (loni)`, '#64748b', [2, 4]);
+      addTrendline(
+        data.yoy_series[tlMetric],
+        `Trend ${meta.label} (loni)`,
+        '#475569',
+        [2, 4],
+        2,
+      );
     }
   }
 
