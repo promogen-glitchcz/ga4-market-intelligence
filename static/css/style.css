@@ -129,6 +129,54 @@ code { background: var(--bg-input); padding: 1px 6px; border-radius: 4px; font-s
 /* Charts */
 .chart-wrap { position: relative; height: 380px; }
 .chart-wrap.chart-small { height: 240px; }
+.chart-wrap.chart-large { height: 480px; }
+
+/* Main chart block */
+.main-chart-block { padding: 20px 24px 24px; }
+.chart-controls {
+  display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;
+  margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+}
+.control-group { display: flex; flex-direction: column; gap: 8px; }
+.control-label { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+.metric-toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+.metric-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 999px; cursor: pointer; font-size: 12px; user-select: none;
+  transition: all 0.15s;
+}
+.metric-pill:hover { background: var(--bg-elevated); }
+.metric-pill input { margin: 0; cursor: pointer; }
+.metric-pill:has(input:checked) { background: rgba(255,107,53,0.12); border-color: var(--accent); color: var(--text); }
+
+#trendline-metric { min-width: 180px; }
+
+/* KPI row */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.kpi-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kpi-card .label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+.kpi-card .value { font-size: 26px; font-weight: 700; }
+.kpi-card .yoy { font-size: 12px; }
+.kpi-card .yoy.up { color: var(--success); }
+.kpi-card .yoy.down { color: var(--danger); }
+.kpi-card .yoy.flat { color: var(--text-faint); }
+
+.data-meta-bar {
+  display: flex; justify-content: space-between; flex-wrap: wrap;
+  padding: 8px 14px; margin-bottom: 14px;
+  font-size: 12px; color: var(--text-dim);
+  background: var(--bg-card); border-radius: 6px; border: 1px solid var(--border);
+}
 
 /* Metric tabs */
 .metric-tabs { display: flex; gap: 4px; flex-wrap: wrap; }

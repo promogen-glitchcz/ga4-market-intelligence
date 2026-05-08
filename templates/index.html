@@ -87,31 +87,46 @@
                     <button class="btn btn-primary" onclick="document.querySelector('[data-view=upload]').click()">📥 Nahrát CSV</button>
                 </div>
 
-                <div id="data-summary" class="hero-grid">
-                    <div class="hero-card"><div class="hero-label">Účtů</div><div class="hero-value" id="kpi-accounts">—</div></div>
-                    <div class="hero-card"><div class="hero-label">Segmentů</div><div class="hero-value" id="kpi-segments">—</div></div>
-                    <div class="hero-card"><div class="hero-label">Týdnů dat</div><div class="hero-value" id="kpi-weeks">—</div></div>
-                    <div class="hero-card"><div class="hero-label">Rozsah</div><div class="hero-value" style="font-size:14px" id="kpi-range">—</div></div>
-                </div>
+                <!-- KPI cards: per-metric totals + YoY -->
+                <div id="kpi-row" class="kpi-row"></div>
 
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Přehled vybraných účtů</h2>
-                        <span class="hint">Vyber účty nebo segment ve filtru nahoře</span>
-                    </div>
-                    <div id="account-strip"><div class="empty-state">Vyber účty.</div></div>
-                </div>
-
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Trend</h2>
-                        <div class="metric-tabs">
-                            <button class="metric-tab active" data-metric="sessions">Návštěvnost</button>
-                            <button class="metric-tab" data-metric="conversions">Konverze</button>
-                            <button class="metric-tab" data-metric="conv_rate">Konv. míra (%)</button>
+                <!-- Main chart with metric selection -->
+                <div class="section-block main-chart-block">
+                    <div class="chart-controls">
+                        <div class="control-group">
+                            <label class="control-label">Zobrazit metriky:</label>
+                            <div class="metric-toggles">
+                                <label class="metric-pill"><input type="checkbox" data-metric="sessions" checked><span>Návštěvnost</span></label>
+                                <label class="metric-pill"><input type="checkbox" data-metric="conversions" checked><span>Konverze</span></label>
+                                <label class="metric-pill"><input type="checkbox" data-metric="conv_rate"><span>Konv. míra (%)</span></label>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Trendová linka pro:</label>
+                            <select id="trendline-metric">
+                                <option value="">— žádná —</option>
+                                <option value="sessions" selected>Návštěvnost</option>
+                                <option value="conversions">Konverze</option>
+                                <option value="conv_rate">Konv. míra</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
+                    <div class="chart-wrap chart-large"><canvas id="main-chart"></canvas></div>
+                </div>
+
+                <!-- Compact data summary -->
+                <div class="data-meta-bar">
+                    <div><strong id="kpi-accounts">—</strong> účtů · <strong id="kpi-weeks">—</strong> týdnů · <span id="kpi-range">—</span></div>
+                    <div><strong id="kpi-segments">—</strong> segmentů · <a href="/api/data/export" style="color:var(--accent); text-decoration:none">⬇ Stáhnout CSV se segmenty</a></div>
+                </div>
+
+                <!-- Account strip (collapsed by default) -->
+                <div class="section-block">
+                    <div class="section-header" style="cursor:pointer" onclick="document.getElementById('account-strip').classList.toggle('hidden'); this.querySelector('.toggle-arrow').textContent = document.getElementById('account-strip').classList.contains('hidden') ? '▾' : '▴'">
+                        <h2>Přehled jednotlivých účtů <span class="toggle-arrow" style="float:right; font-size:14px">▾</span></h2>
+                        <span class="hint">Klikni pro rozbalení tabulky</span>
+                    </div>
+                    <div id="account-strip" class="hidden"></div>
                 </div>
             </section>
 
@@ -187,9 +202,10 @@ window.App = {
     selectedAccountIds: new Set(),
     activeSegment: '',
     period: 'all',
-    activeMetric: 'sessions',
     activeView: 'overview',
-    yoyEnabled: false,
+    yoyEnabled: true,  // YoY default ON per spec
+    selectedMetrics: ['sessions', 'conversions'],  // checked metric pills
+    trendlineMetric: 'sessions',
     accountsSegmentFilter: '',
     accountsNameFilter: '',
     dataRange: { min_week: null, max_week: null },
@@ -310,15 +326,26 @@ function bindFilters() {
     renderAccountsDropdown(); updateSelectedCount(); loadView(App.state.activeView);
   });
 
-  // Metric tabs
-  qsa('.metric-tab').forEach(t => {
-    t.addEventListener('click', () => {
-      qsa('.metric-tab').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      App.state.activeMetric = t.dataset.metric;
+  // Metric checkboxes (top of main chart)
+  qsa('.metric-pill input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const m = cb.dataset.metric;
+      if (cb.checked) {
+        if (!App.state.selectedMetrics.includes(m)) App.state.selectedMetrics.push(m);
+      } else {
+        App.state.selectedMetrics = App.state.selectedMetrics.filter(x => x !== m);
+      }
       renderMainChart();
+      renderKpiRow();
     });
   });
+  // Trendline metric selector
+  byId('trendline-metric')?.addEventListener('change', e => {
+    App.state.trendlineMetric = e.target.value;
+    renderMainChart();
+  });
+  // YoY default = on, sync checkbox
+  byId('filter-yoy').checked = App.state.yoyEnabled;
 }
 
 // ─────────────── Upload ───────────────
@@ -415,11 +442,12 @@ async function loadStatus() {
   byId('kpi-weeks').textContent = (s.data_range && s.data_range.rows) ? Math.round(s.data_range.rows / Math.max(1, s.data_range.properties)) : 0;
   byId('kpi-range').textContent = (s.data_range && s.data_range.min_week)
     ? `${s.data_range.min_week} → ${s.data_range.max_week}` : '—';
-  byId('data-status').innerHTML = (s.data_range && s.data_range.rows)
+  const dst = byId('data-status');
+  if (dst) dst.innerHTML = (s.data_range && s.data_range.rows)
     ? `📊 ${s.data_range.properties} účtů, ${s.data_range.rows.toLocaleString('cs-CZ')} řádků<br>${s.data_range.min_week} → ${s.data_range.max_week}`
     : '⚠️ Žádná data';
-  byId('no-data-banner').classList.toggle('hidden', !!(s.data_range && s.data_range.rows));
-  byId('data-summary').classList.toggle('hidden', !(s.data_range && s.data_range.rows));
+  byId('no-data-banner')?.classList.toggle('hidden', !!(s.data_range && s.data_range.rows));
+  byId('data-summary')?.classList.toggle('hidden', !(s.data_range && s.data_range.rows));
 }
 
 async function loadAccounts() {
@@ -483,8 +511,54 @@ async function loadView(view) {
 }
 
 async function loadOverview() {
-  await renderAccountStrip();
+  await renderKpiRow();
   await renderMainChart();
+  await renderAccountStrip();
+}
+
+const METRIC_META = {
+  sessions: { label: 'Návštěvnost', color: '#FF6B35', bg: 'rgba(255,107,53,0.12)', axis: 'y' },
+  conversions: { label: 'Konverze', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', axis: 'y' },
+  conv_rate: { label: 'Konv. míra (%)', color: '#a855f7', bg: 'rgba(168,85,247,0.12)', axis: 'y2' },
+};
+
+async function renderKpiRow() {
+  const ids = effectivePropertyIds();
+  const wrap = byId('kpi-row');
+  if (!wrap) return;
+  if (!ids.length || App.state.selectedMetrics.length === 0) {
+    wrap.innerHTML = '';
+    return;
+  }
+  const { start, end } = periodRange();
+  const params = `property_ids=${ids.join(',')}&metrics=${App.state.selectedMetrics.join(',')}${start ? '&start='+start : ''}${end ? '&end='+end : ''}${App.state.yoyEnabled ? '&yoy=true' : ''}`;
+  const data = await api(`/api/data/aggregate?${params}`);
+
+  wrap.innerHTML = App.state.selectedMetrics.map(m => {
+    const meta = METRIC_META[m];
+    const total = data.totals[m];
+    const yoy = data.yoy_totals?.[m];
+    let yoyHTML = '';
+    if (yoy != null && yoy !== 0) {
+      let pct;
+      if (m === 'conv_rate') {
+        pct = total - yoy;
+        const cls = pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat';
+        const sign = pct >= 0 ? '+' : '';
+        yoyHTML = `<div class="yoy ${cls}">${sign}${pct.toFixed(2)} pp YoY (loni ${yoy}%)</div>`;
+      } else {
+        pct = (total - yoy) / yoy * 100;
+        const cls = pct > 1 ? 'up' : pct < -1 ? 'down' : 'flat';
+        yoyHTML = `<div class="yoy ${cls}">${fmtPct(pct)} YoY (loni ${fmt(yoy)})</div>`;
+      }
+    }
+    const valDisplay = m === 'conv_rate' ? `${total}%` : fmt(total);
+    return `<div class="kpi-card" style="border-left: 3px solid ${meta.color}">
+      <div class="label">${meta.label}</div>
+      <div class="value" style="color:${meta.color}">${valDisplay}</div>
+      ${yoyHTML}
+    </div>`;
+  }).join('');
 }
 
 function effectivePropertyIds() {
@@ -547,35 +621,50 @@ async function renderMainChart() {
   if (!canvas) return;
   if (App.charts.main) { App.charts.main.destroy(); delete App.charts.main; }
 
-  if (!ids.length) {
+  if (!ids.length || App.state.selectedMetrics.length === 0) {
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
   const { start, end } = periodRange();
   const yoy = App.state.yoyEnabled ? '&yoy=true' : '';
-  const params = `property_ids=${ids.join(',')}&metric=${App.state.activeMetric}${start ? '&start='+start : ''}${end ? '&end='+end : ''}${yoy}`;
-  const data = await api(`/api/data/timeseries?${params}`);
-
-  const colors = ['#FF6B35', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e', '#fbbf24', '#10b981'];
-
-  // Compute SUM line + trendline
-  const dateMap = {};
-  data.series.forEach(s => s.data.forEach(d => { dateMap[d.week_start] = (dateMap[d.week_start] || 0) + d.value; }));
-  const sumPoints = Object.entries(dateMap).sort((a,b) => a[0].localeCompare(b[0])).map(([w,v]) => ({ x: w, y: v }));
+  const params = `property_ids=${ids.join(',')}&metrics=${App.state.selectedMetrics.join(',')}${start ? '&start='+start : ''}${end ? '&end='+end : ''}${yoy}`;
+  const data = await api(`/api/data/aggregate?${params}`);
 
   const datasets = [];
-  if (sumPoints.length && ids.length > 1) {
+  // For each selected metric, add main line + optional YoY dashed
+  App.state.selectedMetrics.forEach(m => {
+    const meta = METRIC_META[m];
+    const series = data.series[m] || [];
+    if (!series.length) return;
     datasets.push({
-      label: 'Součet',
-      data: sumPoints,
-      borderColor: '#FF6B35',
-      backgroundColor: 'rgba(255,107,53,0.15)',
-      borderWidth: 3, fill: true, pointRadius: 0, tension: 0.3, order: 0,
+      label: meta.label,
+      data: series.map(d => ({ x: d.week_start, y: d.value })),
+      borderColor: meta.color,
+      backgroundColor: meta.bg,
+      borderWidth: 2.5, fill: false, pointRadius: 0, tension: 0.3,
+      yAxisID: meta.axis,
+      order: 1,
     });
+    if (data.yoy_series && data.yoy_series[m]) {
+      datasets.push({
+        label: `${meta.label} (loňský rok)`,
+        data: data.yoy_series[m].map(d => ({ x: d.week_start, y: d.value })),
+        borderColor: meta.color + '88',
+        borderDash: [4, 4],
+        borderWidth: 1.5, fill: false, pointRadius: 0, tension: 0.3,
+        yAxisID: meta.axis,
+        order: 2,
+      });
+    }
+  });
 
-    if (sumPoints.length >= 2) {
-      const ys = sumPoints.map(p => p.y);
-      const xs = sumPoints.map((_, i) => i);
+  // Trendline for the chosen metric
+  const tlMetric = App.state.trendlineMetric;
+  if (tlMetric && App.state.selectedMetrics.includes(tlMetric)) {
+    const series = data.series[tlMetric] || [];
+    if (series.length >= 2) {
+      const ys = series.map(p => p.value);
+      const xs = series.map((_, i) => i);
       const n = ys.length;
       const sumX = xs.reduce((a,b) => a+b, 0);
       const sumY = ys.reduce((a,b) => a+b, 0);
@@ -586,38 +675,27 @@ async function renderMainChart() {
       const avg = sumY / n;
       const totalPct = avg > 0 ? slope/avg*100 * n : 0;
       const tcolor = totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8';
+      const meta = METRIC_META[tlMetric];
       datasets.push({
-        label: `Trend (${fmtPct(totalPct)} za období)`,
-        data: xs.map(x => ({ x: sumPoints[x].x, y: slope*x + intercept })),
-        borderColor: tcolor, borderDash: [6,4], borderWidth: 2, fill: false, pointRadius: 0, order: 1,
+        label: `Trend ${meta.label} (${fmtPct(totalPct)})`,
+        data: xs.map(x => ({ x: series[x].week_start, y: slope*x + intercept })),
+        borderColor: tcolor, borderDash: [8, 4],
+        borderWidth: 2, fill: false, pointRadius: 0,
+        yAxisID: meta.axis,
+        order: 0,
       });
     }
   }
 
-  data.series.forEach((s, i) => {
-    if (!s.data.length) return;
-    datasets.push({
-      label: s.display_name,
-      data: s.data.map(d => ({ x: d.week_start, y: d.value })),
-      borderColor: ids.length > 1 ? colors[i % colors.length] + 'cc' : '#FF6B35',
-      borderWidth: ids.length > 1 ? 1.5 : 2,
-      fill: false, pointRadius: ids.length > 1 ? 0 : 2, tension: 0.2,
-      order: 2,
-    });
-  });
+  // Determine if we need a secondary axis
+  const usesY2 = App.state.selectedMetrics.some(m => METRIC_META[m].axis === 'y2');
+  const usesY = App.state.selectedMetrics.some(m => METRIC_META[m].axis === 'y');
 
-  if (data.yoy) {
-    data.yoy.forEach((s, i) => {
-      if (!s.data.length) return;
-      datasets.push({
-        label: `${s.display_name} (loňský rok)`,
-        data: s.data.map(d => ({ x: d.week_start, y: d.value })),
-        borderColor: colors[i % colors.length] + '55',
-        borderDash: [4,4], borderWidth: 1.5, fill: false, pointRadius: 0, tension: 0.2,
-        order: 3,
-      });
-    });
-  }
+  const scales = {
+    x: { type: 'time', time: { unit: 'week' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
+  };
+  if (usesY) scales.y = { type: 'linear', position: 'left', ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' }, beginAtZero: true };
+  if (usesY2) scales.y2 = { type: 'linear', position: 'right', ticks: { color: '#a855f7', callback: v => v + '%' }, grid: { drawOnChartArea: false }, beginAtZero: true };
 
   App.charts.main = new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -626,13 +704,21 @@ async function renderMainChart() {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 10, font: { size: 11 } } },
-        tooltip: { backgroundColor: '#1a2230', borderColor: '#FF6B35', borderWidth: 1, padding: 10 },
+        legend: { position: 'bottom', labels: { color: '#e2e8f0', boxWidth: 12, font: { size: 12 }, padding: 12 } },
+        tooltip: {
+          backgroundColor: '#1a2230', borderColor: '#FF6B35', borderWidth: 1, padding: 12,
+          titleFont: { size: 13 }, bodyFont: { size: 12 },
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed.y;
+              const m = App.state.selectedMetrics.find(mm => METRIC_META[mm].label === ctx.dataset.label || ctx.dataset.label?.startsWith(METRIC_META[mm].label));
+              const isPct = ctx.dataset.yAxisID === 'y2';
+              return `${ctx.dataset.label}: ${isPct ? v.toFixed(2) + '%' : v.toLocaleString('cs-CZ')}`;
+            },
+          },
+        },
       },
-      scales: {
-        x: { type: 'time', time: { unit: 'week' }, ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
-        y: { ticks: { color: '#94a3b8' }, grid: { color: '#1f2a3a' } },
-      },
+      scales,
     },
   });
 }

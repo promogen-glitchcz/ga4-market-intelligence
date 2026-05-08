@@ -58,6 +58,7 @@ def api_status():
 # ─────────────── Upload ───────────────
 
 REQUIRED_COLS = {"property_id", "property_name", "parent_account", "week_start", "sessions", "conversions", "conv_rate"}
+OPTIONAL_COLS = {"segment"}  # if present, applies segment assignments
 
 
 @app.post("/api/upload")
@@ -88,6 +89,7 @@ async def api_upload(file: UploadFile = File(...)):
     weekly_rows: list[dict] = []
     weeks_seen: set = set()
     parse_errors = 0
+    has_segment_col = "segment" in cols
 
     for row in reader:
         try:
@@ -102,6 +104,7 @@ async def api_upload(file: UploadFile = File(...)):
             accounts_seen[pid] = {
                 "display_name": row.get("property_name", "").strip() or pid,
                 "parent_account": row.get("parent_account", "").strip(),
+                "segment": (row.get("segment") or "").strip() if has_segment_col else None,
             }
             weekly_rows.append({
                 "property_id": pid,
@@ -114,9 +117,20 @@ async def api_upload(file: UploadFile = File(...)):
         except (ValueError, TypeError) as e:
             parse_errors += 1
 
-    # Upsert accounts
+    # Upsert accounts + apply segment from CSV (if column was present)
     for pid, meta in accounts_seen.items():
         db.upsert_account(pid, meta["display_name"], meta["parent_account"], import_id)
+        if meta.get("segment"):
+            for slug in meta["segment"].split(";"):
+                slug = slug.strip()
+                if not slug: continue
+                # Make sure segment exists (auto-create if not)
+                with db.conn() as c:
+                    c.execute(
+                        "INSERT OR IGNORE INTO segments (slug, name, color, icon) VALUES (?, ?, ?, ?)",
+                        (slug, slug.replace("-", " ").replace("_", " ").title(), "#64748b", "📦"),
+                    )
+                db.assign_segment(pid, slug)
 
     # Insert weekly data
     inserted = db.insert_weekly_rows(weekly_rows, import_id)
@@ -158,6 +172,130 @@ def api_reset_imports():
     """Wipe all data (segments + accounts kept)."""
     db.reset_weekly_data()
     return {"ok": True}
+
+
+@app.get("/api/data/export")
+def api_export_csv():
+    """Download current data as CSV with segments included.
+    Same format as ga4-export skill output, useful for re-uploading or sharing.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+    from datetime import date as _date
+
+    accounts = {a["property_id"]: a for a in db.list_accounts()}
+    rows = db.query_weekly()
+
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["property_id", "property_name", "parent_account", "segment",
+                "week_start", "sessions", "conversions", "conv_rate"])
+    for r in rows:
+        a = accounts.get(r["property_id"], {})
+        seg = ";".join(a.get("segments") or [])
+        w.writerow([
+            r["property_id"],
+            a.get("display_name", ""),
+            a.get("parent_account", ""),
+            seg,
+            r["week_start"],
+            r["sessions"],
+            r["conversions"],
+            r["conv_rate"],
+        ])
+    out.seek(0)
+    fname = f"ga4-export-{_date.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([out.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.get("/api/data/aggregate")
+def api_aggregate(property_ids: str, metrics: str = "sessions,conversions,conv_rate",
+                   start: str | None = None, end: str | None = None,
+                   yoy: bool = False):
+    """Aggregate multiple metrics across selected accounts, weekly.
+    Returns one series per metric, summed across all selected property_ids.
+    For YoY, also returns the same metrics from a year ago, week-aligned.
+    """
+    pids = [p.strip() for p in property_ids.split(",") if p.strip()]
+    metric_list = [m.strip() for m in metrics.split(",") if m.strip()]
+    rows = db.query_weekly(pids, start, end)
+
+    by_week: dict[str, dict] = {}
+    for r in rows:
+        w = r["week_start"]
+        if w not in by_week:
+            by_week[w] = {"week_start": w, "sessions": 0, "conversions": 0, "_n": 0}
+        by_week[w]["sessions"] += r["sessions"]
+        by_week[w]["conversions"] += r["conversions"]
+        by_week[w]["_n"] += 1
+    series_per_metric: dict[str, list] = {m: [] for m in metric_list}
+    sorted_weeks = sorted(by_week.values(), key=lambda x: x["week_start"])
+    for w in sorted_weeks:
+        for m in metric_list:
+            if m == "conv_rate":
+                v = (w["conversions"] / w["sessions"] * 100) if w["sessions"] else 0
+            else:
+                v = w.get(m, 0)
+            series_per_metric[m].append({"week_start": w["week_start"], "value": round(v, 2)})
+
+    yoy_series_per_metric = None
+    if yoy:
+        from datetime import timedelta as _td, datetime as _dt
+        def shift(iso): return (_dt.fromisoformat(iso) - _td(days=365)).date().isoformat()
+        ys = shift(start) if start else None
+        ye = shift(end) if end else None
+        yrows = db.query_weekly(pids, ys, ye)
+        ymap: dict[str, dict] = {}
+        for r in yrows:
+            shifted_week = (_dt.fromisoformat(r["week_start"]) + _td(days=365)).date().isoformat()
+            if shifted_week not in ymap:
+                ymap[shifted_week] = {"week_start": shifted_week, "sessions": 0, "conversions": 0}
+            ymap[shifted_week]["sessions"] += r["sessions"]
+            ymap[shifted_week]["conversions"] += r["conversions"]
+        yoy_series_per_metric = {m: [] for m in metric_list}
+        for w in sorted(ymap.values(), key=lambda x: x["week_start"]):
+            for m in metric_list:
+                if m == "conv_rate":
+                    v = (w["conversions"] / w["sessions"] * 100) if w["sessions"] else 0
+                else:
+                    v = w.get(m, 0)
+                yoy_series_per_metric[m].append({"week_start": w["week_start"], "value": round(v, 2)})
+
+    # Totals (KPI cards)
+    totals = {}
+    for m in metric_list:
+        if m == "conv_rate":
+            ts = sum(w["sessions"] for w in sorted_weeks)
+            tc = sum(w["conversions"] for w in sorted_weeks)
+            totals[m] = round(tc / ts * 100, 2) if ts else 0
+        else:
+            totals[m] = round(sum(w.get(m, 0) for w in sorted_weeks), 2)
+    yoy_totals = None
+    if yoy_series_per_metric:
+        yoy_totals = {}
+        for m in metric_list:
+            if m == "conv_rate":
+                ts = sum(p["value"] * p["value"] for p in yoy_series_per_metric.get(m, []))  # placeholder
+                # Use map directly
+                ymap_vals = sorted(ymap.values(), key=lambda x: x["week_start"]) if 'ymap' in dir() else []
+                ts2 = sum(w["sessions"] for w in ymap_vals)
+                tc2 = sum(w["conversions"] for w in ymap_vals)
+                yoy_totals[m] = round(tc2 / ts2 * 100, 2) if ts2 else 0
+            else:
+                yoy_totals[m] = round(sum(p["value"] for p in yoy_series_per_metric.get(m, [])), 2)
+
+    return {
+        "metrics": metric_list,
+        "n_accounts": len(pids),
+        "series": series_per_metric,
+        "yoy_series": yoy_series_per_metric,
+        "totals": totals,
+        "yoy_totals": yoy_totals,
+    }
 
 
 # ─────────────── Accounts & segments ───────────────
