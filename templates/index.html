@@ -672,13 +672,14 @@ async function renderMainChart() {
     });
     if (data.yoy_series && data.yoy_series[m]) {
       datasets.push({
-        label: `${meta.label} (loňský rok)`,
+        label: `↶ ${meta.label} loni`,
         data: data.yoy_series[m].map(d => ({ x: d.week_start, y: d.value })),
-        borderColor: meta.color + '88',
-        borderDash: [4, 4],
+        borderColor: '#94a3b8',  // šedá pre loňský rok — jasne odlíšená od current
+        backgroundColor: 'rgba(148,163,184,0.05)',
+        borderDash: [3, 3],
         borderWidth: 1.5, fill: false, pointRadius: 0, tension: 0.3,
         yAxisID: meta.axis,
-        order: 2,
+        order: 3,
       });
     }
   });
