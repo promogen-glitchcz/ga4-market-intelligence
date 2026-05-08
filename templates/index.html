@@ -487,19 +487,33 @@ function effectivePropertyIds() {
       .filter(a => (a.segments || []).includes(App.state.activeSegment))
       .map(a => a.property_id);
   }
-  return [...App.state.selectedAccountIds];
+  if (App.state.selectedAccountIds.size > 0) {
+    return [...App.state.selectedAccountIds];
+  }
+  // Default: show TOP 20 accounts (or all if fewer) when nothing is selected
+  return App.state.accounts.slice(0, 20).map(a => a.property_id);
 }
 
 async function renderAccountStrip() {
   const ids = effectivePropertyIds();
   const wrap = byId('account-strip');
   if (!ids.length) {
-    wrap.innerHTML = '<div class="empty-state">Vyber segment ve filtru, nebo konkrétní účty.</div>';
+    wrap.innerHTML = '<div class="empty-state">Žádné účty. Nahraj CSV.</div>';
     return;
+  }
+  // Show notice if showing default top-20 (no manual selection)
+  const isDefault = !App.state.activeSegment && App.state.selectedAccountIds.size === 0;
+  if (isDefault && App.state.accounts.length > 20) {
+    wrap.innerHTML = `<div style="background:rgba(255,107,53,0.1); border:1px solid var(--accent); border-radius:6px; padding:10px; margin-bottom:10px; font-size:12px">
+      📌 Zobrazujem top 20 účtů z ${App.state.accounts.length}. Pro výběr klikni „Vybrat účty ▾" nebo vyber segment.
+    </div>`;
+  } else {
+    wrap.innerHTML = '';
   }
   const { start, end } = periodRange();
   const data = await api(`/api/data/account_strip?property_ids=${ids.join(',')}${start ? '&start='+start : ''}${end ? '&end='+end : ''}`);
   wrap.innerHTML = '';
+  // Don't reset wrap.innerHTML — append to (possible) notice
   data.accounts.forEach((a, i) => {
     if (a.no_data) {
       wrap.innerHTML += `<div class="account-row-strip"><div class="acc-strip-name">${a.display_name}<span class="pid">${a.property_id}</span></div><div style="grid-column:2/-1; color:var(--text-faint)">žádná data v období</div></div>`;
