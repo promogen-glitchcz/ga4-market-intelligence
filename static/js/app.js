@@ -118,6 +118,7 @@ function bindFilters() {
   });
   byId('btn-clear-all').addEventListener('click', () => {
     App.state.selectedAccountIds.clear();
+    App.state._userClearedSelection = true;
     renderAccountsDropdown(); updateSelectedCount(); loadView(App.state.activeView);
   });
   byId('btn-select-segment').addEventListener('click', () => {
@@ -244,6 +245,11 @@ async function loadStatus() {
 
 async function loadAccounts() {
   App.state.accounts = await api('/api/accounts');
+  // Auto-select ALL accounts on first load so user sees data immediately.
+  // Only auto-fill if user hasn't explicitly cleared selection.
+  if (App.state.selectedAccountIds.size === 0 && !App.state._userClearedSelection) {
+    App.state.accounts.forEach(a => App.state.selectedAccountIds.add(a.property_id));
+  }
   renderAccountsDropdown();
   updateSelectedCount();
 }
@@ -311,8 +317,7 @@ function effectivePropertyIds() {
   if (App.state.selectedAccountIds.size > 0) {
     return [...App.state.selectedAccountIds];
   }
-  // Default: show TOP 20 accounts (or all if fewer) when nothing is selected
-  return App.state.accounts.slice(0, 20).map(a => a.property_id);
+  return App.state.accounts.map(a => a.property_id);
 }
 
 async function renderAccountStrip() {
@@ -322,15 +327,7 @@ async function renderAccountStrip() {
     wrap.innerHTML = '<div class="empty-state">Žádné účty. Nahraj CSV.</div>';
     return;
   }
-  // Show notice if showing default top-20 (no manual selection)
-  const isDefault = !App.state.activeSegment && App.state.selectedAccountIds.size === 0;
-  if (isDefault && App.state.accounts.length > 20) {
-    wrap.innerHTML = `<div style="background:rgba(255,107,53,0.1); border:1px solid var(--accent); border-radius:6px; padding:10px; margin-bottom:10px; font-size:12px">
-      📌 Zobrazujem top 20 účtů z ${App.state.accounts.length}. Pro výběr klikni „Vybrat účty ▾" nebo vyber segment.
-    </div>`;
-  } else {
-    wrap.innerHTML = '';
-  }
+  wrap.innerHTML = '';
   const { start, end } = periodRange();
   const data = await api(`/api/data/account_strip?property_ids=${ids.join(',')}${start ? '&start='+start : ''}${end ? '&end='+end : ''}`);
   wrap.innerHTML = '';
