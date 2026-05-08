@@ -53,6 +53,56 @@ GA4_INDUSTRY_MAP = {
 }
 
 
+def agent_parent_propagation() -> dict:
+    """For each parent_account, if at least one property has a non-default segment tag,
+    propagate that tag to ALL untagged sibling properties under the same parent.
+    This catches cases where GA4 industryCategory is set on only one property of a multi-property account.
+    """
+    run_id = db.start_agent_run("parent_propagation")
+    propagated = 0
+    parents_processed = 0
+    try:
+        accounts = db.list_accounts()
+        # Group by parent_account
+        by_parent: dict[str, list] = {}
+        for a in accounts:
+            parent = a.get("parent_account") or a.get("parent_account_name") or "(none)"
+            by_parent.setdefault(parent, []).append(a)
+
+        for parent, group in by_parent.items():
+            if len(group) < 2: continue
+            parents_processed += 1
+            # Find the most common non-trivial segment among siblings
+            tag_votes = Counter()
+            for a in group:
+                for s in (a.get("segments") or []):
+                    if s not in ("ostatni", "nezarazeno"):
+                        tag_votes[s] += 1
+            if not tag_votes: continue
+            winner_slug = tag_votes.most_common(1)[0][0]
+
+            # Apply to siblings that have NO non-trivial tag
+            for a in group:
+                existing = set(a.get("segments") or [])
+                if winner_slug in existing: continue
+                non_trivial = existing - {"ostatni", "nezarazeno"}
+                if non_trivial: continue  # already has another good tag, leave it
+                # Remove placeholder tags first
+                for placeholder in ("ostatni", "nezarazeno"):
+                    if placeholder in existing:
+                        db.remove_segment(a["property_id"], placeholder)
+                db.assign_segment(a["property_id"], winner_slug)
+                propagated += 1
+
+        summary = f"Propagated tags across {parents_processed} parent groups, tagged {propagated} sibling accounts"
+        db.finish_agent_run(run_id, "success", propagated, summary)
+        return {"propagated": propagated, "parents": parents_processed}
+    except Exception as e:
+        logger.exception("Parent propagation failed")
+        db.finish_agent_run(run_id, "error", propagated, "", str(e))
+        raise
+
+
 def agent_segment_discovery(force_refresh: bool = False) -> dict:
     """Use GA4 Admin API to read industry category for each property,
     auto-create matching segments and tag accounts. Idempotent."""
@@ -382,6 +432,7 @@ def agent_top_movers() -> dict:
 
 ADVANCED_AGENTS = {
     "segment_discovery": agent_segment_discovery,
+    "parent_propagation": agent_parent_propagation,
     "correlation": agent_cross_account_correlation,
     "pattern": agent_pattern_hunter,
     "channel_shift": agent_channel_shift_detector,
