@@ -1,4 +1,6 @@
 // Promogen Intelligence — upload-based viewer
+console.log('[app.js] script starting...');
+window.__appjs_running__ = true;
 window.App = {
   state: {
     accounts: [],
@@ -16,8 +18,8 @@ window.App = {
   charts: {},
 };
 
-const $ = id => document.getElementById(id);
-const $$ = sel => document.querySelectorAll(sel);
+const byId = id => document.getElementById(id);
+const qsa = sel => document.querySelectorAll(sel);
 
 const fmt = n => {
   if (n == null || isNaN(n)) return '—';
@@ -75,13 +77,13 @@ async function init() {
 }
 
 function bindNav() {
-  $$('.nav-item').forEach(btn => {
+  qsa('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => {
-      $$('.nav-item').forEach(b => b.classList.remove('active'));
+      qsa('.nav-item').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      $$('.view').forEach(v => v.classList.remove('active'));
+      qsa('.view').forEach(v => v.classList.remove('active'));
       const view = btn.dataset.view;
-      $('view-' + view).classList.add('active');
+      byId('view-' + view).classList.add('active');
       App.state.activeView = view;
       loadView(view);
     });
@@ -89,36 +91,36 @@ function bindNav() {
 }
 
 function bindFilters() {
-  $('filter-segment').addEventListener('change', e => {
+  byId('filter-segment').addEventListener('change', e => {
     App.state.activeSegment = e.target.value;
     loadView(App.state.activeView);
   });
-  $('filter-period').addEventListener('change', e => {
+  byId('filter-period').addEventListener('change', e => {
     App.state.period = e.target.value;
     loadView(App.state.activeView);
   });
-  $('filter-yoy').addEventListener('change', e => {
+  byId('filter-yoy').addEventListener('change', e => {
     App.state.yoyEnabled = e.target.checked;
     loadView(App.state.activeView);
   });
-  $('btn-toggle-accounts').addEventListener('click', () => {
-    $('accounts-dropdown').classList.toggle('hidden');
+  byId('btn-toggle-accounts').addEventListener('click', () => {
+    byId('accounts-dropdown').classList.toggle('hidden');
   });
   document.addEventListener('click', e => {
     if (!e.target.closest('.filter-accounts')) {
-      $('accounts-dropdown').classList.add('hidden');
+      byId('accounts-dropdown').classList.add('hidden');
     }
   });
-  $('accounts-search').addEventListener('input', renderAccountsDropdown);
-  $('btn-select-all').addEventListener('click', () => {
+  byId('accounts-search').addEventListener('input', renderAccountsDropdown);
+  byId('btn-select-all').addEventListener('click', () => {
     App.state.accounts.forEach(a => App.state.selectedAccountIds.add(a.property_id));
     renderAccountsDropdown(); updateSelectedCount(); loadView(App.state.activeView);
   });
-  $('btn-clear-all').addEventListener('click', () => {
+  byId('btn-clear-all').addEventListener('click', () => {
     App.state.selectedAccountIds.clear();
     renderAccountsDropdown(); updateSelectedCount(); loadView(App.state.activeView);
   });
-  $('btn-select-segment').addEventListener('click', () => {
+  byId('btn-select-segment').addEventListener('click', () => {
     if (!App.state.activeSegment) { alert('Vyber segment vlevo'); return; }
     App.state.accounts.forEach(a => {
       if (a.segments.includes(App.state.activeSegment)) {
@@ -129,9 +131,9 @@ function bindFilters() {
   });
 
   // Metric tabs
-  $$('.metric-tab').forEach(t => {
+  qsa('.metric-tab').forEach(t => {
     t.addEventListener('click', () => {
-      $$('.metric-tab').forEach(x => x.classList.remove('active'));
+      qsa('.metric-tab').forEach(x => x.classList.remove('active'));
       t.classList.add('active');
       App.state.activeMetric = t.dataset.metric;
       renderMainChart();
@@ -142,8 +144,8 @@ function bindFilters() {
 // ─────────────── Upload ───────────────
 
 function bindUpload() {
-  const zone = $('upload-zone');
-  const input = $('csv-input');
+  const zone = byId('upload-zone');
+  const input = byId('csv-input');
   zone.addEventListener('click', () => input.click());
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragging'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
@@ -153,7 +155,7 @@ function bindUpload() {
   });
   input.addEventListener('change', e => { if (e.target.files[0]) handleUpload(e.target.files[0]); });
 
-  $('btn-reset-data').addEventListener('click', async () => {
+  byId('btn-reset-data').addEventListener('click', async () => {
     if (!confirm('Smazat VŠECHNA data (importy + týdenní záznamy)? Segmenty a účty zůstanou.')) return;
     await api('/api/imports/reset', { method: 'POST' });
     await loadStatus();
@@ -163,7 +165,7 @@ function bindUpload() {
 }
 
 async function handleUpload(file) {
-  const result = $('upload-result');
+  const result = byId('upload-result');
   result.innerHTML = '<div class="loading">⏳ Nahrávám a parsuji…</div>';
   try {
     const form = new FormData();
@@ -196,7 +198,7 @@ async function handleUpload(file) {
 
 async function loadImports() {
   const data = await api('/api/imports');
-  const wrap = $('imports-list');
+  const wrap = byId('imports-list');
   if (!data.imports.length) {
     wrap.innerHTML = '<div class="empty-state">Zatím žádné importy.</div>';
     return;
@@ -228,16 +230,16 @@ async function loadImports() {
 async function loadStatus() {
   const s = await api('/api/status');
   App.state.dataRange = s.data_range || {};
-  $('kpi-accounts').textContent = s.accounts;
-  $('kpi-segments').textContent = s.segments;
-  $('kpi-weeks').textContent = (s.data_range && s.data_range.rows) ? Math.round(s.data_range.rows / Math.max(1, s.data_range.properties)) : 0;
-  $('kpi-range').textContent = (s.data_range && s.data_range.min_week)
+  byId('kpi-accounts').textContent = s.accounts;
+  byId('kpi-segments').textContent = s.segments;
+  byId('kpi-weeks').textContent = (s.data_range && s.data_range.rows) ? Math.round(s.data_range.rows / Math.max(1, s.data_range.properties)) : 0;
+  byId('kpi-range').textContent = (s.data_range && s.data_range.min_week)
     ? `${s.data_range.min_week} → ${s.data_range.max_week}` : '—';
-  $('data-status').innerHTML = (s.data_range && s.data_range.rows)
+  byId('data-status').innerHTML = (s.data_range && s.data_range.rows)
     ? `📊 ${s.data_range.properties} účtů, ${s.data_range.rows.toLocaleString('cs-CZ')} řádků<br>${s.data_range.min_week} → ${s.data_range.max_week}`
     : '⚠️ Žádná data';
-  $('no-data-banner').classList.toggle('hidden', !!(s.data_range && s.data_range.rows));
-  $('data-summary').classList.toggle('hidden', !(s.data_range && s.data_range.rows));
+  byId('no-data-banner').classList.toggle('hidden', !!(s.data_range && s.data_range.rows));
+  byId('data-summary').classList.toggle('hidden', !(s.data_range && s.data_range.rows));
 }
 
 async function loadAccounts() {
@@ -248,15 +250,15 @@ async function loadAccounts() {
 
 async function loadSegments() {
   App.state.segments = await api('/api/segments');
-  const sel = $('filter-segment');
+  const sel = byId('filter-segment');
   const populated = App.state.segments.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
   sel.innerHTML = '<option value="">Všechny segmenty</option>' +
     populated.map(s => `<option value="${s.slug}">${s.icon} ${s.name} (${s.account_count})</option>`).join('');
 }
 
 function renderAccountsDropdown() {
-  const search = ($('accounts-search')?.value || '').toLowerCase();
-  const wrap = $('accounts-list');
+  const search = (byId('accounts-search')?.value || '').toLowerCase();
+  const wrap = byId('accounts-list');
   if (!wrap) return;
   const segMap = Object.fromEntries(App.state.segments.map(s => [s.slug, s]));
   const filtered = App.state.accounts.filter(a =>
@@ -283,7 +285,7 @@ function renderAccountsDropdown() {
 }
 
 function updateSelectedCount() {
-  $('accounts-selected-count').textContent = App.state.selectedAccountIds.size;
+  byId('accounts-selected-count').textContent = App.state.selectedAccountIds.size;
 }
 
 // ─────────────── Views ───────────────
@@ -311,7 +313,7 @@ function effectivePropertyIds() {
 
 async function renderAccountStrip() {
   const ids = effectivePropertyIds();
-  const wrap = $('account-strip');
+  const wrap = byId('account-strip');
   if (!ids.length) {
     wrap.innerHTML = '<div class="empty-state">Vyber segment ve filtru, nebo konkrétní účty.</div>';
     return;
@@ -339,7 +341,7 @@ async function renderAccountStrip() {
   });
   data.accounts.forEach((a, i) => {
     if (a.no_data || !a.sparkline?.length) return;
-    const c = $(`spark-${i}`)?.getContext('2d');
+    const c = byId(`spark-${i}`)?.getContext('2d');
     if (!c) return;
     new Chart(c, {
       type: 'line',
@@ -351,7 +353,7 @@ async function renderAccountStrip() {
 
 async function renderMainChart() {
   const ids = effectivePropertyIds();
-  const canvas = $('main-chart');
+  const canvas = byId('main-chart');
   if (!canvas) return;
   if (App.charts.main) { App.charts.main.destroy(); delete App.charts.main; }
 
@@ -448,7 +450,7 @@ async function renderMainChart() {
 // ─────────────── Segments view ───────────────
 
 async function loadSegmentsView() {
-  const wrap = $('segments-detail');
+  const wrap = byId('segments-detail');
   const populated = App.state.segments.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
   if (!populated.length) {
     wrap.innerHTML = '<div class="empty-state">Žádné segmenty s účty. Otevři kartu Účty a přiřaď.</div>';
@@ -489,7 +491,7 @@ async function renderSegmentDetail(slug) {
   const params = `segment=${slug}${start ? '&start='+start : ''}${end ? '&end='+end : ''}${yoy}`;
   const data = await api(`/api/data/segment_rollup?${params}`);
   if (!data.available) {
-    $(`sum-${slug}`).innerHTML = '<em>Žádné účty v segmentu.</em>';
+    byId(`sum-${slug}`).innerHTML = '<em>Žádné účty v segmentu.</em>';
     return;
   }
   const o = data.overall;
@@ -498,7 +500,7 @@ async function renderSegmentDetail(slug) {
   const convYoY = yoyOverall ? ((o.conversions - yoyOverall.conversions) / yoyOverall.conversions * 100) : null;
   const cYoY = yoyOverall ? (o.conv_rate - yoyOverall.conv_rate) : null;
 
-  $(`sum-${slug}`).innerHTML = `
+  byId(`sum-${slug}`).innerHTML = `
     <div style="display:flex; gap:24px; flex-wrap:wrap; padding-top:8px">
       <div><strong>${data.n_accounts}</strong> účtů</div>
       <div>Návštěvnost: <strong>${fmt(o.sessions)}</strong>${sessYoY != null ? ` <span style="color:${sessYoY>=0?'#22c55e':'#ef4444'}">${fmtPct(sessYoY)} YoY</span>` : ''}</div>
@@ -508,7 +510,7 @@ async function renderSegmentDetail(slug) {
   `;
 
   // Chart: segment sum + per-account lines
-  const canvas = $(`seg-chart-${slug}`);
+  const canvas = byId(`seg-chart-${slug}`);
   if (App.charts['seg-' + slug]) App.charts['seg-' + slug].destroy();
   const colors = ['#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16', '#3b82f6', '#f43f5e', '#fbbf24'];
   const datasets = [
@@ -546,7 +548,7 @@ async function renderSegmentDetail(slug) {
   });
 
   // Per-account table
-  $(`seg-accs-${slug}`).innerHTML = `
+  byId(`seg-accs-${slug}`).innerHTML = `
     <table class="accounts-table" style="margin-top:8px">
       <thead><tr><th>Účet</th><th style="text-align:right">Návštěvnost</th><th style="text-align:right">Konverze</th><th style="text-align:right">Konv. míra</th></tr></thead>
       <tbody>${data.per_account.map(a => `
@@ -563,7 +565,7 @@ async function renderSegmentDetail(slug) {
 
 async function renderAccountsTable() {
   await loadAccounts();
-  const wrap = $('accounts-table-wrap');
+  const wrap = byId('accounts-table-wrap');
   if (!App.state.accounts.length) {
     wrap.innerHTML = '<div class="empty-state">Zatím žádné účty. Nahraj CSV.</div>';
     return;
@@ -571,7 +573,7 @@ async function renderAccountsTable() {
   const segMap = Object.fromEntries(App.state.segments.map(s => [s.slug, s]));
 
   // Segment filter dropdown
-  const segFilter = $('accounts-segment-filter');
+  const segFilter = byId('accounts-segment-filter');
   if (segFilter) {
     const populated = App.state.segments.filter(s => s.account_count > 0).sort((a,b) => b.account_count - a.account_count);
     const cur = App.state.accountsSegmentFilter;
@@ -580,7 +582,7 @@ async function renderAccountsTable() {
       '<option value="__none__">Bez segmentu</option>';
     segFilter.onchange = () => { App.state.accountsSegmentFilter = segFilter.value; renderAccountsTable(); };
   }
-  const nameFilter = $('accounts-name-filter');
+  const nameFilter = byId('accounts-name-filter');
   if (nameFilter) {
     nameFilter.value = App.state.accountsNameFilter;
     nameFilter.oninput = () => { App.state.accountsNameFilter = nameFilter.value; renderAccountsTable(); };
@@ -593,7 +595,7 @@ async function renderAccountsTable() {
     const q = App.state.accountsNameFilter.toLowerCase();
     filtered = filtered.filter(a => a.display_name.toLowerCase().includes(q) || a.property_id.includes(q));
   }
-  $('accounts-filter-count').textContent = `${filtered.length} / ${App.state.accounts.length}`;
+  byId('accounts-filter-count').textContent = `${filtered.length} / ${App.state.accounts.length}`;
 
   const bulkBar = `<div id="bulk-action-bar" style="background:var(--bg-elevated); padding:10px 14px; border-radius:8px; margin-bottom:10px; display:none; align-items:center; gap:10px; flex-wrap:wrap">
     <span><strong id="bulk-count">0</strong> vybraných</span>
@@ -626,19 +628,19 @@ async function renderAccountsTable() {
   wrap.innerHTML = html;
 
   // Bulk actions
-  const bar = $('bulk-action-bar');
+  const bar = byId('bulk-action-bar');
   const updateBar = () => {
     const sel = wrap.querySelectorAll('.bulk-check:checked');
     bar.style.display = sel.length ? 'flex' : 'none';
-    $('bulk-count').textContent = sel.length;
+    byId('bulk-count').textContent = sel.length;
   };
   wrap.querySelectorAll('.bulk-check').forEach(cb => cb.addEventListener('change', updateBar));
-  $('bulk-check-all').addEventListener('change', e => {
+  byId('bulk-check-all').addEventListener('change', e => {
     wrap.querySelectorAll('.bulk-check').forEach(c => c.checked = e.target.checked);
     updateBar();
   });
   const doBulk = async (replace) => {
-    const slug = $('bulk-segment-select').value;
+    const slug = byId('bulk-segment-select').value;
     if (!slug) { alert('Vyber segment'); return; }
     const ids = [...wrap.querySelectorAll('.bulk-check:checked')].map(c => c.dataset.pid);
     if (!ids.length) return;
@@ -649,11 +651,11 @@ async function renderAccountsTable() {
     await loadSegments();
     renderAccountsTable();
   };
-  $('bulk-replace-btn').addEventListener('click', () => doBulk(true));
-  $('bulk-add-btn').addEventListener('click', () => doBulk(false));
-  $('bulk-cancel-btn').addEventListener('click', () => {
+  byId('bulk-replace-btn').addEventListener('click', () => doBulk(true));
+  byId('bulk-add-btn').addEventListener('click', () => doBulk(false));
+  byId('bulk-cancel-btn').addEventListener('click', () => {
     wrap.querySelectorAll('.bulk-check').forEach(c => c.checked = false);
-    $('bulk-check-all').checked = false;
+    byId('bulk-check-all').checked = false;
     updateBar();
   });
 
