@@ -96,7 +96,8 @@
                         <strong style="color:var(--text)">Vysvetlivky:</strong>
                         <span><span style="display:inline-block; width:24px; height:3px; background:#FF6B35; vertical-align:middle; margin-right:4px"></span> aktuální období</span>
                         <span><span style="display:inline-block; width:24px; height:0; border-top:2px dashed #94a3b8; vertical-align:middle; margin-right:4px"></span> stejné období loni (YoY)</span>
-                        <span><span style="display:inline-block; width:24px; height:0; border-top:2px dashed #22c55e; vertical-align:middle; margin-right:4px"></span> trendová linka</span>
+                        <span><span style="display:inline-block; width:24px; height:0; border-top:2px dashed #22c55e; vertical-align:middle; margin-right:4px"></span> trendová linka (aktuální)</span>
+                        <span><span style="display:inline-block; width:24px; height:0; border-top:2px dotted #64748b; vertical-align:middle; margin-right:4px"></span> trendová linka (loni)</span>
                     </div>
                     <div class="chart-controls">
                         <div class="control-group">
@@ -690,13 +691,15 @@ async function renderMainChart() {
     }
   });
 
-  // Trendline for the chosen metric
+  // Trendline for the chosen metric (current + optionally YoY)
   const tlMetric = App.state.trendlineMetric;
   if (tlMetric && App.state.selectedMetrics.includes(tlMetric)) {
-    const series = data.series[tlMetric] || [];
-    if (series.length >= 2) {
-      const ys = series.map(p => p.value);
-      const xs = series.map((_, i) => i);
+    const meta = METRIC_META[tlMetric];
+
+    function addTrendline(seriesData, label, dashColor, dashStyle) {
+      if (seriesData.length < 2) return;
+      const ys = seriesData.map(p => p.value);
+      const xs = seriesData.map((_, i) => i);
       const n = ys.length;
       const sumX = xs.reduce((a,b) => a+b, 0);
       const sumY = ys.reduce((a,b) => a+b, 0);
@@ -706,16 +709,21 @@ async function renderMainChart() {
       const intercept = (sumY - slope*sumX) / n;
       const avg = sumY / n;
       const totalPct = avg > 0 ? slope/avg*100 * n : 0;
-      const tcolor = totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8';
-      const meta = METRIC_META[tlMetric];
+      const computed = dashColor || (totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8');
       datasets.push({
-        label: `Trend ${meta.label} (${fmtPct(totalPct)})`,
-        data: xs.map(x => ({ x: series[x].week_start, y: slope*x + intercept })),
-        borderColor: tcolor, borderDash: [8, 4],
+        label: `${label} (${fmtPct(totalPct)})`,
+        data: xs.map(x => ({ x: seriesData[x].week_start, y: slope*x + intercept })),
+        borderColor: computed,
+        borderDash: dashStyle || [8, 4],
         borderWidth: 2, fill: false, pointRadius: 0,
         yAxisID: meta.axis,
         order: 0,
       });
+    }
+
+    addTrendline(data.series[tlMetric] || [], `Trend ${meta.label}`);
+    if (data.yoy_series && data.yoy_series[tlMetric]) {
+      addTrendline(data.yoy_series[tlMetric], `Trend ${meta.label} (loni)`, '#64748b', [2, 4]);
     }
   }
 

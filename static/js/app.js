@@ -490,13 +490,15 @@ async function renderMainChart() {
     }
   });
 
-  // Trendline for the chosen metric
+  // Trendline for the chosen metric (current + optionally YoY)
   const tlMetric = App.state.trendlineMetric;
   if (tlMetric && App.state.selectedMetrics.includes(tlMetric)) {
-    const series = data.series[tlMetric] || [];
-    if (series.length >= 2) {
-      const ys = series.map(p => p.value);
-      const xs = series.map((_, i) => i);
+    const meta = METRIC_META[tlMetric];
+
+    function addTrendline(seriesData, label, dashColor, dashStyle) {
+      if (seriesData.length < 2) return;
+      const ys = seriesData.map(p => p.value);
+      const xs = seriesData.map((_, i) => i);
       const n = ys.length;
       const sumX = xs.reduce((a,b) => a+b, 0);
       const sumY = ys.reduce((a,b) => a+b, 0);
@@ -506,16 +508,21 @@ async function renderMainChart() {
       const intercept = (sumY - slope*sumX) / n;
       const avg = sumY / n;
       const totalPct = avg > 0 ? slope/avg*100 * n : 0;
-      const tcolor = totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8';
-      const meta = METRIC_META[tlMetric];
+      const computed = dashColor || (totalPct > 5 ? '#22c55e' : totalPct < -5 ? '#ef4444' : '#94a3b8');
       datasets.push({
-        label: `Trend ${meta.label} (${fmtPct(totalPct)})`,
-        data: xs.map(x => ({ x: series[x].week_start, y: slope*x + intercept })),
-        borderColor: tcolor, borderDash: [8, 4],
+        label: `${label} (${fmtPct(totalPct)})`,
+        data: xs.map(x => ({ x: seriesData[x].week_start, y: slope*x + intercept })),
+        borderColor: computed,
+        borderDash: dashStyle || [8, 4],
         borderWidth: 2, fill: false, pointRadius: 0,
         yAxisID: meta.axis,
         order: 0,
       });
+    }
+
+    addTrendline(data.series[tlMetric] || [], `Trend ${meta.label}`);
+    if (data.yoy_series && data.yoy_series[tlMetric]) {
+      addTrendline(data.yoy_series[tlMetric], `Trend ${meta.label} (loni)`, '#64748b', [2, 4]);
     }
   }
 
