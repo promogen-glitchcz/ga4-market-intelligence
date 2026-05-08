@@ -1,110 +1,111 @@
-# GA4 Market Intelligence
+# Promogen Intelligence
 
-Lokálna FastAPI appka na hĺbkovú analýzu **Google Analytics 4** dát naprieč mnohými účtami. Inšpirovaná `meta-ads-monitor`, ale pre GA4.
+Lokálna upload-based viewer GA4 dát naprieč všetkými účtami agentúry.
 
-## Čo robí
+## Architektúra
 
-- **Multi-account dashboard** — vyberieš si účty + obdobie + segment, dostaneš lineárny graf, account strip (1 riadok = 1 účet) s KPI a sparklines
-- **Market Health Score** (0–100) per segment — composite skóre z YoY/MoM, conv rate, revenue, engagement, trend; verdict od *trh frčí* po *trh je v riti*
-- **24/7 agenti** ktorí neustále skenujú dáta:
-  - **Anomaly hunter** (10 min) — z-score na sessions/conversions/revenue
-  - **Health scorer** (15 min) — Market Health pre každý segment
-  - **Trend tracker** — lineárny trend na 30d
-  - **Forecaster** — Holt-Winters predikcia 30 dní vpred
-  - **Cross-account correlation** (2h) — nájde dvojice účtov ktoré sa hýbu spolu (trhový signál) alebo proti sebe (konkurencia)
-  - **Pattern hunter** — DoW efekty, sviatky
-  - **Channel shift detector** — flagne keď sa zmenil podiel kanálov
-  - **Top movers** — top 10 najpohyblivejších účtov WoW
-  - **Insight refiner** (6h) — deduplikuje a auto-dismissne staré
-  - **Daily briefing** (08:00) — 1-stránkový "stav trhu"
-- **Hypotézy** — spýtaš sa otázku, agent odpovie s evidenciou
-- **Lokálna DB** (DuckDB + SQLite) — žiadne cloud, plná kontrola dát
+**Dva nezávislé nástroje:**
+
+1. **`ga4-export` skill** (Claude Code skill) — stiahne CSV z GA4 API
+2. **Promogen Intelligence app** (FastAPI lokálka, port 8060) — viewer pre uploadovaný CSV
+
+Žiadne automatické agentmi. Žiadne 24/7 background loops. Iba: vyexportuj → nahraj → prezri.
 
 ## Rýchly štart
 
+### 1. Spustenie appky
+
 ```bash
-# 1. Inštalácia
-cd ga4-market-intelligence
-python3 -m venv venv
+cd ~/Downloads/claude/ga4-market-intelligence
 source venv/bin/activate
-pip install -r requirements.txt
-
-# 2. OAuth (jeden raz) — pripojí Google Analytics
-# Vytvor Desktop OAuth client v https://console.cloud.google.com/apis/credentials
-# Vlož client_id + secret do ~/.google_tokens.json (formát: { "default": { "client_id": "...", "client_secret": "..." }})
-python3 oauth_setup.py
-
-# 3. Zapni potrebné API v GCP
-# https://console.developers.google.com/apis/api/analyticsadmin.googleapis.com/overview
-# https://console.developers.google.com/apis/api/analyticsdata.googleapis.com/overview
-
-# 4. Spustenie
 python3 app.py
 # → http://localhost:8060
 ```
 
-## 24/7 mód (macOS)
+### 2. Vyexportovanie GA4 dát (jeden raz, kedykoľvek chceš čerstvé dáta)
 
-```bash
-./install_autostart.sh
+V Claude Code napíš jedno z:
+- „export ga4"
+- „stiahni ga4 data"
+- „vyexportuj ga4 účty"
+
+Skill spustí `python3 ~/.claude/skills/ga4-export/export.py` ktorý:
+- Použije OAuth credentials z `~/.google_tokens.json`
+- Stiahne všetky GA4 properties (Admin API)
+- Pre každú vyžiada týždenné dáta za 56 týždňov (≈13 mesiacov)
+- Metriky: **sessions, conversions, conv_rate**
+- Uloží do `~/Downloads/ga4-weekly-YYYY-MM-DD.csv`
+
+### 3. Nahranie CSV do appky
+
+Otvor http://localhost:8060 → klikni „Nahrát CSV" v sidebare → drag&drop CSV súbor.
+App parsne, uloží do SQLite, zobrazí dáta.
+
+### 4. Použitie
+
+- **Přehled:** Vyber účty alebo segment → vidíš KPI strip + trendový graf
+- **Segmenty:** Klikni „Otevřít detail" na segmente → tabuľka účtov + graf súčtu
+- **Účty:** Tabuľka všetkých účtov + filter + bulk reassignment do segmentov
+- **Nahrát CSV:** Upload + history předchádzajúcich importov
+
+## CSV formát
+
+```csv
+property_id,property_name,parent_account,week_start,sessions,conversions,conv_rate
+267083701,sevt.cz – GA4,SEVT,2025-04-07,12345,234,1.89
+267083701,sevt.cz – GA4,SEVT,2025-04-14,11200,198,1.77
+...
 ```
 
-Toto pridá macOS LaunchAgent ktorý:
-- Spustí appku pri logine
-- Auto-reštart pri páde
-- Loguje do `data/launchagent.log`
-- Agenti pracujú stále, kým je PC zapnutý
+Long-format: 1 riadok = 1 property × 1 týždeň. `week_start` je pondelok týždňa.
 
-## Architektúra
+## Funkcionalita
 
-```
-config.py            ─ paths, intervaly, váhy Health Score
-database.py          ─ SQLite (config + insights) + DuckDB (warehouse)
-auth.py              ─ OAuth credentials cache + refresh
-ga4_api.py           ─ GA4 Data API + Admin API klient
-sync.py              ─ stiahne daily/channel/source/device/country/hourly metrics
-analyzer.py          ─ z-score, trend, YoY/MoM, Holt-Winters, korelácie
-correlations.py      ─ DoW, hour, holidays, channel mix shifts
-intelligence.py      ─ Market Health Score, insight generators
-agents.py            ─ základní agenti
-agents_advanced.py   ─ pokročilí (correlation, pattern, refiner, top-movers)
-auto_segment.py      ─ heuristika ktorá tagne účty k segmentom podľa názvu
-app.py               ─ FastAPI hlavný app + background loops
-templates/index.html ─ frontend (sidebar, view switching, filtre)
-static/css/style.css ─ tmavý dashboard štýl
-static/js/app.js     ─ Chart.js, fetch API, view rendering
-```
+| Vrstva | Čo umie |
+|---|---|
+| Filtre | Segment, Období (4/13/26/52 týdnů, YTD, all), výber účtov, YoY toggle |
+| Account Strip | KPI + sparkline + 4-week trend % per účet |
+| Trend graf | Multi-line chart, súčet, lineárny trendline, voliteľne YoY overlay |
+| Segment detail | Súčet segmentu + per-účet krivky, YoY porovnanie |
+| Bulk reassign | Označ viac účtov → preraď do iného segmentu (jeden klik) |
+
+## Lokálne dáta
+
+- `data/ga4_intel.db` — SQLite (segmenty, účty, importy, týždenné metriky)
+- `data/uploads/` — záloha nahraných CSV súborov
+
+## Stack
+
+- **Backend:** FastAPI + SQLite (žiadny DuckDB, žiadne agentmi)
+- **Frontend:** Vanilla JS + Chart.js + date-fns adapter
+- **Skill:** Standalone Python script (urllib only, žiadne GA SDK)
+- **Auth:** OAuth Desktop client v `~/.google_tokens.json`
 
 ## Endpointy
 
 | Path | Účel |
 |---|---|
-| `GET  /` | dashboard UI |
-| `GET  /api/status` | OAuth + počty |
-| `GET  /api/accounts` | zoznam GA4 properties |
-| `POST /api/accounts/discover` | znova pull zo zo Admin API |
-| `PUT  /api/accounts/{id}/monitored` | zapni/vypni sync |
-| `POST /api/accounts/{id}/segments` | priraď segment |
-| `GET  /api/segments` | zoznam segmentov |
-| `GET  /api/metrics/account_strip` | KPI + sparkline pre vybrané účty |
-| `GET  /api/metrics/timeseries?metric=sessions&...` | denné série pre multi-line chart |
-| `GET  /api/metrics/channel` | channel breakdown |
-| `GET  /api/correlations/dow` | day-of-week pattern |
-| `GET  /api/correlations/holidays` | holiday effect |
-| `GET  /api/insights` | filtrovateľný feed insights |
-| `GET  /api/alerts` | unread alerty |
-| `POST /api/agents/run/{name}` | manuál spustenie agenta |
-| `POST /api/sync/run` | manuál sync všetkých |
-| `POST /api/hypothesis` | otestovanie hypotézy |
-| `GET  /api/health/{segment}` | Market Health Score history |
-| `GET  /api/briefing` | aktuálny daily briefing |
+| `GET /` | dashboard UI |
+| `GET /api/status` | stav (počty + rozsah dát) |
+| `POST /api/upload` | nahranie CSV |
+| `GET /api/imports` | história importov |
+| `DELETE /api/imports/{id}` | zmazanie importu + jeho dát |
+| `POST /api/imports/reset` | wipe všetkých dát |
+| `GET /api/accounts` | účty + ich segmenty |
+| `GET /api/segments` | segmenty + počty účtov |
+| `POST /api/accounts/bulk_assign` | bulk reassignment |
+| `GET /api/data/timeseries` | týždenné metriky pre graf |
+| `GET /api/data/account_strip` | KPI per účet |
+| `GET /api/data/segment_rollup` | súčty + per-účet pre segment |
 
-## Roadmap (čo treba dorobiť)
+## OAuth setup (jeden raz)
 
-- Vertical/segment auto-classifier cez GA4 Industry Category (lepší než kľúčové slová)
-- Weather correlation (reuse z meta-ads-monitor)
-- Geographic heatmap
-- Cross-segment co-movement (keď padne kola, padá aj sport?)
-- Native LLM hypothesis answering cez Claude API key
-- Slack/email alert sink
-- Side-by-side účet komparátor
+```bash
+python3 oauth_setup.py
+```
+
+Otvorí browser, prihlasiš sa do `google@promogen.cz`, povoliš scope `analytics.readonly`. Tokeny sa uložia do `~/.google_tokens.json`.
+
+Ak Google Analytics Admin API ešte nie je zapnuté:
+- https://console.developers.google.com/apis/api/analyticsadmin.googleapis.com/overview?project=964285332420
+- https://console.developers.google.com/apis/api/analyticsdata.googleapis.com/overview?project=964285332420

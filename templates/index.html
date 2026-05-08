@@ -4,30 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }}</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=11">
+    <link rel="stylesheet" href="/static/css/style.css?v=100">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
 <body>
 <div class="app">
-    <!-- Sidebar -->
     <aside class="sidebar">
         <div class="brand">
-            <div class="logo">G4</div>
+            <div class="logo">PG</div>
             <div>
                 <h1>Promogen Intelligence</h1>
-                <div class="subtitle">GA4 tržní analytika</div>
+                <div class="subtitle">GA4 viewer (upload CSV)</div>
             </div>
         </div>
-
         <nav class="nav">
-            <div class="nav-section-title">Navigace</div>
             <button class="nav-item active" data-view="overview">
                 <span class="icon">📊</span><span>Přehled</span>
-            </button>
-            <button class="nav-item" data-view="dashboard">
-                <span class="icon">📈</span><span>Dashboard</span>
             </button>
             <button class="nav-item" data-view="segments">
                 <span class="icon">🎯</span><span>Segmenty</span>
@@ -35,63 +29,34 @@
             <button class="nav-item" data-view="accounts">
                 <span class="icon">🏢</span><span>Účty</span>
             </button>
-            <button class="nav-item" data-view="insights">
-                <span class="icon">💡</span><span>Insights</span>
-                <span class="badge" id="insights-badge">0</span>
-            </button>
-            <button class="nav-item" data-view="agents">
-                <span class="icon">🤖</span><span>Agenti</span>
-                <span class="live-dot" id="agents-live"></span>
-            </button>
-            <button class="nav-item" data-view="hypotheses">
-                <span class="icon">🔬</span><span>Hypotézy</span>
-            </button>
-            <button class="nav-item" data-view="briefing">
-                <span class="icon">📰</span><span>Daily Briefing</span>
+            <button class="nav-item" data-view="upload">
+                <span class="icon">📥</span><span>Nahrát CSV</span>
             </button>
         </nav>
-
         <div class="sidebar-footer">
-            <div class="connection" id="connection-status">
-                <div class="status-dot" id="status-dot"></div>
-                <span id="status-text">Kontroluji…</span>
-            </div>
+            <div id="data-status" style="font-size:11px; color:var(--text-faint); padding:8px"></div>
         </div>
     </aside>
 
-    <!-- Main -->
     <main class="main">
-        <!-- Sticky filter bar -->
         <header class="filter-bar">
             <div class="filter-group">
                 <label>Segment</label>
                 <select id="filter-segment"><option value="">Všechny segmenty</option></select>
             </div>
             <div class="filter-group">
-                <label>Období (preset)</label>
+                <label>Období</label>
                 <select id="filter-period">
-                    <option value="7">Posledních 7 dní</option>
-                    <option value="30" selected>Posledních 30 dní</option>
-                    <option value="90">Posledních 90 dní</option>
-                    <option value="180">Posledních 180 dní</option>
-                    <option value="365">Poslední rok</option>
-                    <option value="year_2026">📅 Celý rok 2026</option>
-                    <option value="year_2025">📅 Celý rok 2025</option>
-                    <option value="year_2024">📅 Celý rok 2024</option>
+                    <option value="all" selected>Všechna data</option>
+                    <option value="last_4">Posledních 4 týdny</option>
+                    <option value="last_13">Posledních 13 týdnů</option>
+                    <option value="last_26">Posledních 26 týdnů</option>
+                    <option value="last_52">Posledních 52 týdnů</option>
                     <option value="ytd">Od začátku roku (YTD)</option>
-                    <option value="mtd">Od začátku měsíce (MTD)</option>
-                    <option value="custom">Vlastní…</option>
                 </select>
             </div>
-            <div class="filter-group" id="filter-custom-dates" style="display:none">
-                <label>Od → Do</label>
-                <div style="display:flex; gap:6px">
-                    <input type="date" id="filter-date-start" />
-                    <input type="date" id="filter-date-end" />
-                </div>
-            </div>
             <div class="filter-group filter-accounts">
-                <label>Účty (<span id="accounts-selected-count">0</span> vybraných)</label>
+                <label>Účty (<span id="accounts-selected-count">0</span>)</label>
                 <button id="btn-toggle-accounts" class="btn btn-light">Vybrat účty ▾</button>
                 <div class="accounts-dropdown hidden" id="accounts-dropdown">
                     <input type="text" id="accounts-search" placeholder="Hledat…" />
@@ -107,123 +72,54 @@
                 <label>Porovnání</label>
                 <label class="yoy-toggle">
                     <input type="checkbox" id="filter-yoy" />
-                    <span>Meziročně (YoY)</span>
+                    <span>Meziročně</span>
                 </label>
             </div>
             <div class="filter-spacer"></div>
-            <button id="btn-refresh" class="btn btn-primary" title="Aktualizuj data">↻ Aktualizovat</button>
-            <button id="btn-run-agents" class="btn btn-accent" title="Spustit agenty">⚡ Spustit agenty</button>
         </header>
 
-        <!-- Views -->
         <div class="view-container">
-
             <!-- OVERVIEW -->
             <section id="view-overview" class="view active">
-                <!-- Segment-level banner (shown when a segment is filtered) -->
-                <div id="segment-banner" class="segment-banner hidden"></div>
-
-                <div class="hero-grid">
-                    <div class="hero-card">
-                        <div class="hero-label">Účty pod monitoringem</div>
-                        <div class="hero-value" id="kpi-accounts">—</div>
-                    </div>
-                    <div class="hero-card">
-                        <div class="hero-label">Segmenty</div>
-                        <div class="hero-value" id="kpi-segments">—</div>
-                    </div>
-                    <div class="hero-card">
-                        <div class="hero-label">Insights za 24h</div>
-                        <div class="hero-value" id="kpi-insights">—</div>
-                    </div>
-                    <div class="hero-card">
-                        <div class="hero-label">Běží agentů</div>
-                        <div class="hero-value" id="kpi-agents">—</div>
-                    </div>
+                <div id="no-data-banner" class="hero-card hidden" style="text-align:center; padding:40px">
+                    <h2 style="margin-bottom:12px">Žádná data</h2>
+                    <p style="color:var(--text-dim); margin-bottom:20px">Nahraj CSV exportované přes skill <code>ga4-export</code>.</p>
+                    <button class="btn btn-primary" onclick="document.querySelector('[data-view=upload]').click()">📥 Nahrát CSV</button>
                 </div>
 
-                <div class="section-block">
-                    <div class="section-header"><h2>Zdraví všech segmentů</h2></div>
-                    <div id="segments-grid" class="segments-grid"><div class="loading">Načítám…</div></div>
+                <div id="data-summary" class="hero-grid">
+                    <div class="hero-card"><div class="hero-label">Účtů</div><div class="hero-value" id="kpi-accounts">—</div></div>
+                    <div class="hero-card"><div class="hero-label">Segmentů</div><div class="hero-value" id="kpi-segments">—</div></div>
+                    <div class="hero-card"><div class="hero-label">Týdnů dat</div><div class="hero-value" id="kpi-weeks">—</div></div>
+                    <div class="hero-card"><div class="hero-label">Rozsah</div><div class="hero-value" style="font-size:14px" id="kpi-range">—</div></div>
                 </div>
 
                 <div class="section-block">
                     <div class="section-header">
-                        <h2>Přehled účtů — řádek = 1 účet</h2>
-                        <span class="hint">Vyber účty nahoře, data se zobrazí zde</span>
+                        <h2>Přehled vybraných účtů</h2>
+                        <span class="hint">Vyber účty nebo segment ve filtru nahoře</span>
                     </div>
-                    <div id="account-strip" class="account-strip">
-                        <div class="empty-state">Vyber účty ve filtru nahoře.</div>
-                    </div>
+                    <div id="account-strip"><div class="empty-state">Vyber účty.</div></div>
                 </div>
 
                 <div class="section-block">
                     <div class="section-header">
-                        <h2>Trend vybraných účtů</h2>
-                        <div class="metric-tabs" id="overview-metric-tabs">
-                            <button class="metric-tab active" data-metric="sessions">Sessions</button>
-                            <button class="metric-tab" data-metric="users">Uživatelé</button>
-                            <button class="metric-tab" data-metric="conversions">Konverze</button>
-                            <button class="metric-tab" data-metric="purchase_revenue">Tržby</button>
-                        </div>
-                    </div>
-                    <div class="chart-wrap">
-                        <canvas id="overview-chart"></canvas>
-                    </div>
-                </div>
-
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Trend segmentu — součet + jednotlivé účty</h2>
-                        <span class="hint">Vyber segment ve filtru a vidíš agregát i křivky účtů na jednom grafu</span>
-                    </div>
-                    <div class="chart-wrap">
-                        <canvas id="overview-segment-chart"></canvas>
-                    </div>
-                    <div id="overview-segment-summary" style="margin-top:10px; font-size:13px; color:var(--text-dim)"></div>
-                </div>
-
-                <div class="section-block">
-                    <div class="section-header"><h2>Nejnovější insights</h2></div>
-                    <div id="overview-insights" class="insights-list"><div class="loading">Načítavam...</div></div>
-                </div>
-            </section>
-
-            <!-- DASHBOARD -->
-            <section id="view-dashboard" class="view">
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Multi-account graf</h2>
+                        <h2>Trend</h2>
                         <div class="metric-tabs">
-                            <button class="metric-tab active" data-metric="sessions">Sessions</button>
-                            <button class="metric-tab" data-metric="users">Uživatelé</button>
+                            <button class="metric-tab active" data-metric="sessions">Návštěvnost</button>
                             <button class="metric-tab" data-metric="conversions">Konverze</button>
-                            <button class="metric-tab" data-metric="purchase_revenue">Tržby</button>
-                            <button class="metric-tab" data-metric="bounce_rate">Míra okamžitého opuštění</button>
+                            <button class="metric-tab" data-metric="conv_rate">Konv. míra (%)</button>
                         </div>
                     </div>
-                    <div class="chart-wrap">
-                        <canvas id="multi-chart"></canvas>
-                    </div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header"><h2>Rozpis kanálů (vybrané účty)</h2></div>
-                    <div id="channel-breakdown" class="channel-breakdown"><div class="loading">…</div></div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header"><h2>Dny v týdnu — vzorec</h2></div>
-                    <div class="chart-wrap chart-small"><canvas id="dow-chart"></canvas></div>
+                    <div class="chart-wrap"><canvas id="main-chart"></canvas></div>
                 </div>
             </section>
 
             <!-- SEGMENTS -->
             <section id="view-segments" class="view">
                 <div class="section-block">
-                    <div class="section-header">
-                        <h2>Tržní zdraví per segment (0-100)</h2>
-                        <span class="hint">Kompozitní skóre z YoY/MoM, konv. míry, tržeb, engagement, trendu</span>
-                    </div>
-                    <div id="segments-detail" class="segments-detail"><div class="loading">…</div></div>
+                    <div class="section-header"><h2>Segmenty</h2></div>
+                    <div id="segments-detail"><div class="loading">…</div></div>
                 </div>
             </section>
 
@@ -232,124 +128,54 @@
                 <div class="section-block">
                     <div class="section-header">
                         <h2>Účty &amp; segmenty</h2>
-                        <button id="btn-discover" class="btn btn-primary">Načíst GA4 účty</button>
                     </div>
                     <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap">
-                        <label style="font-size:12px; color:var(--text-faint); text-transform:uppercase; letter-spacing:1px; font-weight:600">Filtr segmentu:</label>
-                        <select id="accounts-segment-filter" style="min-width:280px"></select>
-                        <input type="text" id="accounts-name-filter" placeholder="Hledat podle názvu účtu…" style="flex:1; min-width:240px" />
+                        <label style="font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:1px; font-weight:600">Filtr segmentu:</label>
+                        <select id="accounts-segment-filter" style="min-width:240px"></select>
+                        <input type="text" id="accounts-name-filter" placeholder="Hledat podle názvu účtu…" style="flex:1; min-width:200px" />
                         <span id="accounts-filter-count" style="font-size:12px; color:var(--text-dim)"></span>
                     </div>
                     <div id="accounts-table-wrap"><div class="loading">…</div></div>
                 </div>
             </section>
 
-            <!-- INSIGHTS -->
-            <section id="view-insights" class="view">
+            <!-- UPLOAD -->
+            <section id="view-upload" class="view">
                 <div class="section-block">
-                    <div class="section-header"><h2>Všechny insights</h2></div>
-                    <div class="filter-tabs" id="insights-filters">
-                        <button class="ft active" data-type="">Všechny</button>
-                        <button class="ft" data-type="anomaly">Anomálie</button>
-                        <button class="ft" data-type="trend">Trendy</button>
-                        <button class="ft" data-type="forecast">Predikce</button>
-                        <button class="ft" data-type="health_score">Zdraví</button>
-                        <button class="ft" data-type="correlation">Korelace</button>
+                    <div class="section-header">
+                        <h2>Nahrát CSV</h2>
+                        <span class="hint">Soubor vygeneruj přes skill <code>ga4-export</code> v Claude Code</span>
                     </div>
-                    <div id="insights-full-list" class="insights-list"><div class="loading">…</div></div>
+                    <div id="upload-zone" class="upload-zone">
+                        <input type="file" id="csv-input" accept=".csv" hidden />
+                        <div class="upload-icon">📥</div>
+                        <p><strong>Klikni nebo přetáhni CSV soubor</strong></p>
+                        <p style="font-size:12px; color:var(--text-faint)">Povinné sloupce: property_id, property_name, parent_account, week_start, sessions, conversions, conv_rate</p>
+                    </div>
+                    <div id="upload-result" style="margin-top:14px"></div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header">
+                        <h2>Předchozí importy</h2>
+                        <button id="btn-reset-data" class="btn" style="background:var(--danger); color:white; border-color:var(--danger)">🗑️ Smazat všechna data</button>
+                    </div>
+                    <div id="imports-list"><div class="loading">…</div></div>
+                </div>
+
+                <div class="section-block">
+                    <div class="section-header"><h2>Jak vyexportovat data</h2></div>
+                    <div style="font-size:13px; line-height:1.7">
+                        <p>1. V Claude Code napiš: <code>spusti ga4 export</code></p>
+                        <p>2. Skill stáhne data ze všech tvých GA4 účtů (sessions, conversions, conv rate, 13 měsíců po týdnech)</p>
+                        <p>3. Vytvoří CSV ve složce <code>~/Downloads/ga4-weekly-YYYY-MM-DD.csv</code></p>
+                        <p>4. Nahraj ho sem (drag&drop nebo klikni)</p>
+                    </div>
                 </div>
             </section>
-
-            <!-- AGENTS -->
-            <section id="view-agents" class="view">
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Stav 24/7 smyček</h2>
-                        <span class="hint">Co běží na pozadí stále, dokud je PC zapnutý — můžeš zastavit/spustit</span>
-                    </div>
-                    <div style="display:flex; gap:8px; margin-bottom:10px">
-                        <button id="btn-stop-all-loops" class="btn">⏸ Zastavit všechny</button>
-                        <button id="btn-start-all-loops" class="btn btn-primary">▶ Spustit všechny</button>
-                    </div>
-                    <div id="loops-grid" class="loops-grid"><div class="loading">…</div></div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Lokální databáze</h2>
-                        <span class="hint">Kde se ukládají všechna data na tvém PC</span>
-                    </div>
-                    <div id="db-info"><div class="loading">…</div></div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Manuální spuštění agenta</h2>
-                        <span class="hint">Klikni a spustí se okamžitě</span>
-                    </div>
-                    <div class="agent-controls">
-                        <button class="btn btn-accent" data-agent="anomaly">▶ Lovec anomálií</button>
-                        <button class="btn btn-accent" data-agent="health">▶ Zdravotní skóre</button>
-                        <button class="btn btn-accent" data-agent="trend">▶ Sledovač trendů</button>
-                        <button class="btn btn-accent" data-agent="forecast">▶ Predikce</button>
-                        <button class="btn btn-accent" data-agent="briefing">▶ Denní briefing</button>
-                        <button class="btn btn-accent" data-agent="segment_discovery">▶ Objevení segmentů (GA4)</button>
-                        <button class="btn btn-accent" data-agent="correlation">▶ Křížová korelace</button>
-                        <button class="btn btn-accent" data-agent="pattern">▶ Lovec vzorců</button>
-                        <button class="btn btn-accent" data-agent="channel_shift">▶ Posuny kanálů</button>
-                        <button class="btn btn-accent" data-agent="top_movers">▶ Top hybatelé</button>
-                        <button class="btn btn-accent" data-agent="refine">▶ Vylepšení insights</button>
-                        <button class="btn btn-primary" data-agent="all">⚡ Spustit všechny</button>
-                    </div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Historie běhů</h2>
-                        <span class="hint">Posledních 100 spuštění s počtem nálezů</span>
-                    </div>
-                    <div id="agent-activity-list" class="activity-list"><div class="loading">…</div></div>
-                </div>
-            </section>
-
-            <!-- HYPOTHESES -->
-            <section id="view-hypotheses" class="view">
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Položit otázku</h2>
-                        <span class="hint">Příklad: „Padá segment kola víc než ostatní?"</span>
-                    </div>
-                    <div class="hypothesis-form">
-                        <textarea id="hypothesis-question" placeholder="Napiš svou hypotézu / otázku…"></textarea>
-                        <div class="hypothesis-controls">
-                            <select id="hypothesis-scope">
-                                <option value="global">Celý trh</option>
-                                <option value="segment">Konkrétní segment</option>
-                                <option value="account">Konkrétní účet</option>
-                            </select>
-                            <select id="hypothesis-scope-id" class="hidden"></select>
-                            <button id="btn-test-hypothesis" class="btn btn-primary">Otestovat</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="section-block">
-                    <div class="section-header"><h2>Předchozí hypotézy</h2></div>
-                    <div id="hypotheses-list" class="hypotheses-list"><div class="loading">…</div></div>
-                </div>
-            </section>
-
-            <!-- BRIEFING -->
-            <section id="view-briefing" class="view">
-                <div class="section-block">
-                    <div class="section-header">
-                        <h2>Denní briefing</h2>
-                        <button id="btn-regen-briefing" class="btn btn-primary">↻ Regenerovat teď</button>
-                    </div>
-                    <div id="briefing-content"><div class="loading">…</div></div>
-                </div>
-            </section>
-
         </div>
     </main>
 </div>
-
-<script src="/static/js/app.js?v=13"></script>
+<script src="/static/js/app.js?v=101"></script>
 </body>
 </html>
