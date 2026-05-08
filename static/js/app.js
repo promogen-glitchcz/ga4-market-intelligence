@@ -141,6 +141,7 @@ function bindFilters() {
       } else {
         App.state.selectedMetrics = App.state.selectedMetrics.filter(x => x !== m);
       }
+      syncTrendlineDropdown();
       renderMainChart();
       renderKpiRow();
     });
@@ -152,6 +153,30 @@ function bindFilters() {
   });
   // YoY default = on, sync checkbox
   byId('filter-yoy').checked = App.state.yoyEnabled;
+  // Initial trendline sync
+  syncTrendlineDropdown();
+}
+
+function syncTrendlineDropdown() {
+  const sel = byId('trendline-metric');
+  if (!sel) return;
+  const labels = { sessions: 'Návštěvnost', conversions: 'Konverze', conv_rate: 'Konv. míra' };
+  const checked = App.state.selectedMetrics;
+  const current = App.state.trendlineMetric;
+  // Build options: only currently-checked metrics + "none"
+  let html = '<option value="">— žádná —</option>';
+  checked.forEach(m => { html += `<option value="${m}">${labels[m]}</option>`; });
+  sel.innerHTML = html;
+  // Keep current selection if still valid, else pick first checked
+  if (checked.includes(current)) {
+    sel.value = current;
+  } else if (checked.length > 0) {
+    App.state.trendlineMetric = checked[0];
+    sel.value = checked[0];
+  } else {
+    App.state.trendlineMetric = '';
+    sel.value = '';
+  }
 }
 
 // ─────────────── Upload ───────────────
